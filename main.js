@@ -71,15 +71,19 @@ Promise.all([
     load(files)
 })
 
-var colour = d3.scaleLinear()
-    .domain([0, 1])
-    .range(["#eeeeee", "#d82520"])
+var sc = d3.scaleLinear()
+    .interpolate(() => d3.interpolateRdPu)
+    // .range(["#eeeeee", "#000", "#d82520"])
+var colour = function(x, max=1) {
+    // if (x == 0) return "#ffffff"
+    return sc.domain([0, max])(x)
+}
+
 
 function load(files) {
     var population = files[0]
     var map = files[1]
     for (var i = 0; i < map.features.length; i++) {
-        console.log(i)
         for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
             if (isNaN(d3.polygonArea(map.features[i].geometry.coordinates[j]))) {
                 if (d3.polygonArea(map.features[i].geometry.coordinates[j][0]) < 0)
@@ -114,8 +118,9 @@ function load(files) {
         data = {...data, ...data2}
     }
 
+    var entropy = {}
+    var entropy_broad = {}
     var sorted = {}
-
     for (code in data) {
         sorted[code] = Object.keys(data[code]).sort(
             function(a, b) {
@@ -123,38 +128,60 @@ function load(files) {
             }
         )
         sorted[code].shift()
+        entropy[code] = 0.0
+        entropy_broad[code] = 0.0
+
+        console.log(sorted[code])
+        sorted[code].forEach(lang => {
+            var p = data[code][lang] / population[code]
+            if (p != 0) {
+                if (lang[0] <= "9" && lang[0] >= "0" && !(lang.includes("Others"))) entropy_broad[code] -= p * Math.log2(p)
+                else entropy[code] -= p * Math.log2(p)
+            }
+        })
     }
-    console.log(langs)
+    
     dropdown.append("option")
         .text("All (broad)")
     dropdown.append("option")
         .text("All (narrow)")
+    dropdown.append("option")
+        .text("All (narrow, second-largest)")
+    dropdown.append("option")
+        .text("All (narrow, third-largest)")
+    dropdown.append("option")
+        .text("Diversity (broad)")
+    dropdown.append("option")
+        .text("Diversity (narrow)")
+    dropdown.append("option")
+        .text("Diversity erasure (narrow - broad)")
 
-    for (key in langs) {
+    var sorted_langs = Object.keys(langs)
+    sorted_langs.sort((a, b) => {
+        if (a[0] >= "0" && a[0] <= "9" && b[0] >= "0" && b[0] <= "9") {
+            return parseInt(a.split(" ")[0]) - parseInt(b.split(" ")[0])
+        }
+        else if (a[0] >= "0" && a[0] <= "9") return -1
+        else if (b[0] >= "0" && b[0] <= "9") return 1
+        else if (a > b) return 1
+        else if (b > a) return -1
+        else return 0
+    })
+    for (key in sorted_langs) {
         if (key != "") dropdown.append("option")
-            .text(key)
+            .text(sorted_langs[key])
     }
     
-    console.log(data)
     var g = d3.select("#map")
         .append("g")
     
     container.call(d3.zoom().on("zoom", function () {
             g.attr("transform", d3.event.transform)
-        })
-        .on("start", function() {
-            g.selectAll("path")
-                .attr("stroke-width", "0px")
-        })
-        .on("end", function() {
-            g.selectAll("path")
-                .attr("stroke-width", "0.5px")
         }))
 
     var lang = ""
 
     dropdown.on("change", function(d) {
-        console.log(this.value)
         update(this.value)
     })
 
@@ -183,27 +210,23 @@ function load(files) {
         .attr("d", d => {
             return path(d)
         })
-        .attr("stroke", "black")
-        .attr("stroke-width", "1px")
+        .attr("opacity", 1)
         .on("mousemove", function (d) {
             tooltip
                 .style("left", (d3.event.pageX + 15) + "px")
                 .style("top", (d3.event.pageY - 28) + "px")
+            d3.select(this).attr("stroke", "black").raise()
         })
         .on("mouseout", function (d) {
             tooltip.transition()
                 .duration(250)
                 .style("opacity", 0)
+            d3.select(this).attr("stroke", null).lower()
         })
 
     function reformat(fill, text) {
         g.selectAll("path")
             .attr("fill", d => {
-                var code = d.properties.censuscode
-                if (!code || fill(code) == undefined) return colour(0)
-                return fill(code)
-            })
-            .attr("stroke", d => {
                 var code = d.properties.censuscode
                 if (!code || fill(code) == undefined) return colour(0)
                 return fill(code)
@@ -225,50 +248,82 @@ function load(files) {
     }
 
     update("")
+
+    function table_broad(c) {
+        var langs = sorted[c].filter(d => {
+            return (d[0] <= "9" && d[0] >= "0" && !d.includes("Others"))
+        })
+        var ret = (entropy_broad[c].toFixed(2)) + " bits (diversity)<br>" +
+            "<table class=\"table table-striped table-sm\">"
+        langs.forEach((d, i) => {
+            if (i >= 5) return
+            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (population[c] ? population[c] : 1)).toFixed(2) + "%</td></tr>"
+        })
+        ret += "</table>"
+        return ret
+    }
+
+    function table_narrow(c) {
+        var langs = sorted[c].filter(d => {
+            return (!(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
+        })
+        var ret = (entropy[c].toFixed(2)) + " bits (diversity)<br>" +
+            "<table class=\"table table-striped table-sm\">"
+        langs.forEach((d, i) => {
+            if (i >= 5) return
+            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (population[c] ? population[c] : 1)).toFixed(2) + "%</td></tr>"
+        })
+        ret += "</table>"
+        return ret
+    }
     
     function update(lang) {
         if (lang == "" || lang == "All (broad)") {
             reformat(function(c) {
                 return stringToColour(sorted[c][0])
-            }, function(c) {
-                var langs = sorted[c].filter(d => {
-                    return (d[0] <= "9" && d[0] >= "0" && !(d.endsWith("OTHER")))
-                })
-                console.log(sorted[c], langs)
-                var ret = "<table class=\"table table-striped table-sm\">"
-                langs.forEach((d, i) => {
-                    if (i >= 5) return
-                    ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</tr>"
-                })
-                ret += "</table>"
-                return ret
-            })
+            }, table_broad)
         }
         else if (lang == "All (narrow)") {
             reformat(function(c) {
-                var maxlang = undefined
-                for (var i = 0; i < sorted[c].length; i++) {
-                    if (sorted[c][i][0] <= "9" && sorted[c][i][0] >= "0") continue
-                    maxlang = sorted[c][i]
-                    break
-                }
-                return stringToColour(maxlang)
-            }, function(c) {
-                var langs = sorted[c].filter(d => {
-                    return (!(d[0] <= "9" && d[0] >= "0") && d != "total" && !(d.endsWith("OTHER")))
-                })
-                var ret = "<table class=\"table table-striped table-sm\">"
-                langs.forEach((d, i) => {
-                    if (i >= 5) return
-                    ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</tr>"
-                })
-                ret += "</table>"
-                return ret
-            })
+                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
+                return stringToColour(langs[0])
+            }, table_narrow)
+        }
+        else if (lang == "All (narrow, second-largest)") {
+            reformat(function(c) {
+                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
+                return stringToColour(langs[1])
+            }, table_narrow)
+        }
+        else if (lang == "All (narrow, third-largest)") {
+            reformat(function(c) {
+                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
+                return stringToColour(langs[2])
+            }, table_narrow)
+        }
+        else if (lang == "Diversity (broad)") {
+            reformat(function(c) {
+                return colour(entropy_broad[c], 4)
+            }, table_broad)
+        }
+        else if (lang == "Diversity (narrow)") {
+            reformat(function(c) {
+                return colour(entropy[c], 4)
+            }, table_narrow)
+        }
+        else if (lang == "Diversity erasure (narrow - broad)") {
+            reformat(function(c) {
+                return colour(entropy[c] - entropy_broad[c], 2.5)
+            }, table_narrow)
         }
         else {
+            maximum = 0.0
+            for (c in population) {
+                var p = data[c][lang] / population[c]
+                if (p > maximum) maximum = p
+            }
             reformat(function(c) {
-                return colour(data[c][lang] / population[c])
+                return colour(data[c][lang] / population[c], maximum)
             }, function(c) {
                 return data[c][lang].toLocaleString('en-US') + " speakers (" +
                 (data[c][lang] / population[c]).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
