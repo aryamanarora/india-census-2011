@@ -28,6 +28,49 @@ dropdown.append("label")
 dropdown = dropdown.append("select")
     .attr("class", "form-control")
     .attr("id", "lang")
+    
+var g = d3.select("#map")
+    .append("g")
+
+container.call(d3.zoom().on("zoom", function () {
+    g.attr("transform", d3.event.transform)
+}))
+
+var sc = d3.scaleLinear()
+    .interpolate(() => d3.interpolateRdPu)
+
+var colour = function(x, max=1) {
+    return sc.domain([0, max])(x)
+}
+
+// draw legend
+function draw_legend(max=1, start, end) {
+    g.selectAll(".legend").remove()
+    for (var i = 0.0; i < 1.0; i += 0.05) {
+        var j = i * max
+        rect = g.append("rect")
+            .attr("class", "legend")
+            .attr("x", 0.6 * width + 0.1 * i * 1500)
+            .attr("y", 0.7 * height)
+            .attr("height", 0.03 * 750)
+            .attr("width", 0.005 * 1500)
+            .attr("fill", colour(j, max=max))
+            .attr("stroke", colour(j, max=max))
+    }
+    g.append("text")
+        .attr("class", "legend")
+        .text(start)
+        .attr("x", 0.6 * width)
+        .attr("y", 0.69 * height)
+        .attr("font-size", "smaller")
+    g.append("text")
+        .attr("class", "legend")
+        .text(end)
+        .attr("x", 0.6 * width + 150)
+        .attr("y", 0.69 * height)
+        .attr("font-size", "smaller")
+        .attr("text-anchor", "end")
+}
 
 Promise.all([
     d3.csv("population.csv"),
@@ -70,14 +113,6 @@ Promise.all([
 ]).then(function (files) {
     load(files)
 })
-
-var sc = d3.scaleLinear()
-    .interpolate(() => d3.interpolateRdPu)
-    // .range(["#eeeeee", "#000", "#d82520"])
-var colour = function(x, max=1) {
-    // if (x == 0) return "#ffffff"
-    return sc.domain([0, max])(x)
-}
 
 
 function load(files) {
@@ -171,13 +206,6 @@ function load(files) {
         if (key != "") dropdown.append("option")
             .text(sorted_langs[key])
     }
-    
-    var g = d3.select("#map")
-        .append("g")
-    
-    container.call(d3.zoom().on("zoom", function () {
-            g.attr("transform", d3.event.transform)
-        }))
 
     var lang = ""
 
@@ -265,7 +293,7 @@ function load(files) {
 
     function table_narrow(c) {
         var langs = sorted[c].filter(d => {
-            return (!(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
+            return (!(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
         })
         var ret = (entropy[c].toFixed(2)) + " bits (diversity)<br>" +
             "<table class=\"table table-striped table-sm\">"
@@ -279,39 +307,46 @@ function load(files) {
     
     function update(lang) {
         if (lang == "" || lang == "All (broad)") {
+            d3.selectAll(".legend").remove()
             reformat(function(c) {
                 return stringToColour(sorted[c][0])
             }, table_broad)
         }
         else if (lang == "All (narrow)") {
+            d3.selectAll(".legend").remove()
             reformat(function(c) {
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
                 return stringToColour(langs[0])
             }, table_narrow)
         }
         else if (lang == "All (narrow, second-largest)") {
+            d3.selectAll(".legend").remove()
             reformat(function(c) {
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
                 return stringToColour(langs[1])
             }, table_narrow)
         }
         else if (lang == "All (narrow, third-largest)") {
+            d3.selectAll(".legend").remove()
             reformat(function(c) {
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total" && !(d.endsWith("OTHER")))
                 return stringToColour(langs[2])
             }, table_narrow)
         }
         else if (lang == "Diversity (broad)") {
+            draw_legend(4, '0 bits', '4')
             reformat(function(c) {
                 return colour(entropy_broad[c], 4)
             }, table_broad)
         }
         else if (lang == "Diversity (narrow)") {
+            draw_legend(4, '0 bits', '4')
             reformat(function(c) {
                 return colour(entropy[c], 4)
             }, table_narrow)
         }
         else if (lang == "Diversity erasure (narrow - broad)") {
+            draw_legend(2.5, '0 bits', '2.5')
             reformat(function(c) {
                 return colour(entropy[c] - entropy_broad[c], 2.5)
             }, table_narrow)
@@ -322,6 +357,7 @@ function load(files) {
                 var p = data[c][lang] / population[c]
                 if (p > maximum) maximum = p
             }
+            draw_legend(maximum, '0%', (maximum * 100).toFixed(2) + '%')
             reformat(function(c) {
                 return colour(data[c][lang] / population[c], maximum)
             }, function(c) {
