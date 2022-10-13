@@ -44,13 +44,18 @@
             .indicator {
                 position: absolute;
                 background-color: white;
+                max-width: 300px;
+                opacity: 50%;
+            }
+            .indicator:hover {
+                opacity: 100%;
             }
         </style>
     </head>
     <body>
-        <div class="indicator row card bg-dark text-white mt-3 ml-3 shadow p-3" style="max-width: 300px;">
+        <div class="indicator row card bg-dark text-white mt-3 ml-3 shadow p-3">
             <h1>Languages of South Asia</h1>
-            <p class="text-white-50">Data from the 2011 Census of India and 2017 Census of Pakistan</p>
+            <p class="text-white-50">Data from the censuses of India (2011), Pakistan (2017), and Nepal (2011).</p>
         </div>
         <svg id="map"></svg>
         <script src="main.js"></script>

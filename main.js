@@ -75,10 +75,11 @@ function draw_legend(max=1, start, end) {
 
 Promise.all([
     d3.csv("population.csv"),
-    d3.json("india-2011.geojson"),
+    d3.json("nepal.geojson"),
     d3.json("pakistan-2017.geojson"),
     d3.json("india-5.json"),
     d3.csv("data/pakistan.csv"),
+    d3.csv("data/nepal.csv"),
     d3.csv("data/andaman.csv"),
     d3.csv("data/andhra_pradesh.csv"),
     d3.csv("data/arunachal_pradesh.csv"),
@@ -132,6 +133,13 @@ function load(files) {
         map.features.push(p)
     }
 
+    // Nepal
+    for (var i = 0; i < files[1].features.length; i++) {
+        p = files[1].features[i]
+        p.properties.censuscode = p.properties.DISTRICT + '_NEPAL'
+        map.features.push(p)
+    }
+
     // India
     for (var i = 0; i < map.features.length; i++) {
         if (!map.features[i].geometry) continue
@@ -161,9 +169,11 @@ function load(files) {
         '34199999': '05929',
         '33599999': '05928'
     }
+
+    // India data
     var data = {}, langs = {}
-    var num_to_broad_lang = {}
-    for (var i = 5; i < files.length; i++) {
+    var num_to_broad_lang = {}, broad_lang_to_num = {}
+    for (var i = 6; i < files.length; i++) {
         var state = undefined, district = undefined
         var data2 = files[i].reduce(function(map, obj) {
             obj["Area name"] = obj["Area name"].trim()
@@ -177,6 +187,7 @@ function load(files) {
                 s = lang.split(" ")
                 s[0] = parseInt(s[0])
                 num_to_broad_lang[s[0]] = s[1]
+                broad_lang_to_num[s[1]] = s[0]
             }
             if (!(lang in langs)) langs[lang] = true
             if (obj.District == "000") state = obj["Area name"]
@@ -200,6 +211,7 @@ function load(files) {
     }
     console.log(data)
 
+    // Pakistan data
     pakistan_to_india = {
         'SINDHI': ['Sindhi', '19 SINDHI'],
         'URDU': ['Urdu', '22 URDU'],
@@ -251,6 +263,48 @@ function load(files) {
         }
     }
 
+    // Nepal data
+    nepal_to_india = {
+        'Avadhi': 'Awadhi', 'Oriya': 'Odia', 'Other': 'Other(s)', 'Rajbanshi': 'Rajbangsi', 'Kurux': 'Kurukh/Oraon',
+        'Hariyanvi': 'Haryanvi', 'Santhali': 'Santali'
+    }
+    nepal_to_broad = {
+        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI'
+    }
+    ct = 127
+    for (var i = 0; i < files[5].length; i++) {
+        var d = files[5][i]
+        var name = d.admin2_name.toUpperCase() + "_NEPAL"
+        d.pop_total = parseInt(d.pop_total)
+        data[name] = new Proxy({}, {
+            get: (target, name) => name in target ? target[name] : 0
+        })
+        data[name]['total'] = d.pop_total
+        for (prop in d) {
+            if (prop.endsWith('_primary')) {
+                var p = parseInt(parseFloat(d[prop]) * d.pop_total)
+                var l = prop.replace('_primary', '')
+                if (l in nepal_to_india) l = nepal_to_india[l]
+                langs[l] = true
+                data[name][l] = p
+                if (l in nepal_to_broad) data[name][nepal_to_broad[l]] += p
+                else {
+                    l = l.toUpperCase()
+                    if (l in broad_lang_to_num) data[name][broad_lang_to_num[l] + ' ' + l] += p
+                    else {
+                        console.log(l)
+                        data[name][ct + ' ' + l] += p
+                        langs[ct + ' ' + l] = true
+                        broad_lang_to_num[l] = ct
+                        num_to_broad_lang[ct] = l
+                        ct += 1
+                    }
+                }
+            }
+        }
+    }
+
+
     var entropy = new Proxy({}, {
         get: (target, name) => name in target ? target[name] : 0
       })
@@ -282,9 +336,9 @@ function load(files) {
     }
     
     dropdown.append("option")
-        .text("All (broad)")
-    dropdown.append("option")
         .text("All (narrow)")
+    dropdown.append("option")
+        .text("All (broad)")
     dropdown.append("option")
         .text("All (narrow, second-largest)")
     dropdown.append("option")
@@ -426,7 +480,7 @@ function load(files) {
     }
     
     function update(lang) {
-        if (lang == "" || lang == "All (broad)") {
+        if (lang == "All (broad)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
                 if (!(c in data)) return colour(undefined)
@@ -434,7 +488,7 @@ function load(files) {
                 return stringToColour(langs[0])
             }, table_broad)
         }
-        else if (lang == "All (narrow)") {
+        else if (lang == "" || lang == "All (narrow)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
                 if (!(c in data)) return colour(undefined)
