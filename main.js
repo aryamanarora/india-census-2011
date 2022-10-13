@@ -78,6 +78,7 @@ Promise.all([
     d3.json("nepal.geojson"),
     d3.json("pakistan-2017.geojson"),
     d3.json("india-5.json"),
+    d3.json("bangladesh.json"),
     d3.csv("data/pakistan.csv"),
     d3.csv("data/nepal.csv"),
     d3.csv("data/andaman.csv"),
@@ -122,7 +123,7 @@ Promise.all([
 
 function load(files) {
     var population = files[0]
-
+    var offset = 5
     var map = files[3]
 
     // Pakistan
@@ -137,6 +138,15 @@ function load(files) {
     for (var i = 0; i < files[1].features.length; i++) {
         p = files[1].features[i]
         p.properties.censuscode = p.properties.DISTRICT + '_NEPAL'
+        map.features.push(p)
+    }
+
+    // Bangladesh
+    for (var i = 0; i < files[4].features.length; i++) {
+        p = files[4].features[i]
+        p.properties.ST_NM = 'Bangladesh'
+        p.properties.DISTRICT = 'Bangladesh'
+        p.properties.censuscode = 'BANGLADESH'
         map.features.push(p)
     }
 
@@ -172,7 +182,7 @@ function load(files) {
     // India data
     var data = {}, langs = {}
     var num_to_broad_lang = {}, broad_lang_to_num = {}
-    for (var i = 6; i < files.length; i++) {
+    for (var i = offset + 2; i < files.length; i++) {
         var state = undefined, district = undefined
         var data2 = files[i].reduce(function(map, obj) {
             obj["Area name"] = obj["Area name"].trim()
@@ -224,8 +234,8 @@ function load(files) {
         'OTHER': ['Other(s)', '124 OTHERS'],
         'total': ['total', 'total']
     }
-    for (var i = 0; i < files[4].length; i++) {
-        d = files[4][i]
+    for (var i = 0; i < files[offset].length; i++) {
+        d = files[offset][i]
         d.count = parseInt(d.count)
         if (d.subdivision == 'KHANPUR TEHSIL') d.subdivision = 'KHAN PUR TEHSIL'
         if (d.subdivision == 'DE-EXCLUDED AREA RAJANPUR') d.subdivision = 'DE-EXCLUDED AREA RAJANPUR TEHSIL'
@@ -272,8 +282,8 @@ function load(files) {
         'Other(s)': '124 OTHERS'
     }
     ct = 127
-    for (var i = 0; i < files[5].length; i++) {
-        var d = files[5][i]
+    for (var i = 0; i < files[offset + 1].length; i++) {
+        var d = files[offset + 1][i]
         var name = d.admin2_name.toUpperCase() + "_NEPAL"
         d.pop_total = parseInt(d.pop_total)
         data[name] = new Proxy({}, {
@@ -303,6 +313,14 @@ function load(files) {
             }
         }
     }
+
+    // Bangladesh data
+    data['BANGLADESH'] = {}
+    data['BANGLADESH']['Bengali'] = 163507029
+    data['BANGLADESH']['2 BENGALI'] = 163507029
+    data['BANGLADESH']['Other(s)'] = 1651587
+    data['BANGLADESH']['124 OTHER'] = 1651587
+    data['BANGLADESH']['total'] = 165158616
 
 
     var entropy = new Proxy({}, {
@@ -347,6 +365,10 @@ function load(files) {
         .text("All (narrow, third-largest)")
     dropdown.append("option")
         .text("All (broad, third-largest)")
+    dropdown.append("option")
+        .text("Number of languages spoken (narrow)")
+    dropdown.append("option")
+        .text("Number of languages spoken (broad)")
     dropdown.append("option")
         .text("Diversity (broad)")
     dropdown.append("option")
@@ -425,6 +447,12 @@ function load(files) {
                 if (!code || fill(code) == undefined) return colour(0)
                 return fill(code)
             })
+            // .attr("stroke", d => {
+            //     var code = d.properties.censuscode
+            //     if (!code || fill(code) == undefined) return colour(0)
+            //     return fill(code)
+            // })
+            // .attr("stroke-width", "0.5px")
             .on("mouseover", function(d) {
                 var code = d.properties.censuscode
                 if (!code) return
@@ -528,6 +556,30 @@ function load(files) {
                 return stringToColour(langs[2])
             }, table_broad)
         }
+        else if (lang == "Number of languages spoken (narrow)") {
+            draw_legend(200, 'None', '200')
+            reformat(function(c) {
+                if (!(c in data)) return colour(undefined)
+                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
+                var ct = 0
+                for (lang in langs) {
+                    if (data[c][langs[lang]] != 0) ct += 1 
+                }
+                return colour(ct, 200)
+            }, table_narrow)
+        }
+        else if (lang == "Number of languages spoken (broad)") {
+            draw_legend(200, 'None', '200')
+            reformat(function(c) {
+                if (!(c in data)) return colour(undefined)
+                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
+                var ct = 0
+                for (lang in langs) {
+                    if (data[c][langs[lang]] != 0) ct += 1 
+                }
+                return colour(ct, 200)
+            }, table_narrow)
+        }
         else if (lang == "Diversity (broad)") {
             draw_legend(4, '0 bits', '4')
             reformat(function(c) {
@@ -550,7 +602,6 @@ function load(files) {
             }, table_narrow)
         }
         else if (lang == "Total classified as other") {
-            d3.selectAll(".legend").remove()
             draw_legend(1, '0%', '100%')
             reformat(function(c) {
                 if (!(c in data)) return colour(undefined)
@@ -573,11 +624,12 @@ function load(files) {
             reformat(function(c) {
                 if (!(c in data)) return colour(undefined)
                 if (data[c]['total'] == 0) return colour(undefined)
+                if (!(lang in data[c])) return colour(0)
                 return colour(data[c][lang] / data[c]['total'], maximum)
             }, function(c) {
                 if (!(c in data)) return '?'
-                return data[c][lang].toLocaleString('en-US') + " speakers (" +
-                (data[c][lang] / data[c]['total']).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
+                return (lang in data[c] ? data[c][lang] : 0).toLocaleString('en-US') + " speakers (" +
+                ((lang in data[c] ? data[c][lang] : 0) / data[c]['total']).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
             })
         }
     }
