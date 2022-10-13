@@ -137,7 +137,7 @@ function load(files) {
         if (!map.features[i].geometry) continue
         if (!map.features[i].properties.censuscode) {
             map.features[i].properties.ST_NM = map.features[i].properties.stname
-            map.features[i].properties.DISTRICT = map.features[i].properties.sdtname + ", " + map.features[i].properties.sdtname
+            map.features[i].properties.DISTRICT = map.features[i].properties.sdtname + ", " + map.features[i].properties.dtname
             map.features[i].properties.censuscode = map.features[i].properties.sdtcode11
         }
         for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
@@ -156,6 +156,11 @@ function load(files) {
         return map
     }, {})
 
+    conv = {
+        '34299999': '05930',
+        '34199999': '05929',
+        '33599999': '05928'
+    }
     var data = {}, langs = {}
     var num_to_broad_lang = {}
     for (var i = 5; i < files.length; i++) {
@@ -177,6 +182,7 @@ function load(files) {
             if (obj.District == "000") state = obj["Area name"]
             if (obj["Sub-"] == "00000") district = obj["Area name"]
             if (obj["Sub-"] != "00000") {
+                if (obj.District + obj["Sub-"] in conv) obj["Sub-"] = conv[obj.District + obj["Sub-"]]
                 obj.District = obj["Sub-"]
                 if (!(obj.District in map)) {
                     map[obj.District] = new Proxy({}, {
@@ -349,7 +355,7 @@ function load(files) {
             tooltip
                 .style("left", (d3.event.pageX + 15) + "px")
                 .style("top", (d3.event.pageY - 28) + "px")
-            d3.select(this).attr("stroke", "black").attr("stroke-width", "1px").raise()
+            d3.select(this).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
         })
         .on("mouseout", function (d) {
             tooltip.transition()
