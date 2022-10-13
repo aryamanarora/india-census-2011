@@ -165,9 +165,8 @@ function load(files) {
     }, {})
 
     conv = {
-        '34299999': '05930',
-        '34199999': '05929',
-        '33599999': '05928'
+        '34299999': '05930', '34199999': '05929', '33599999': '05928', '51899999': '05927',
+        '51999999': '05926', '60399999': '05925'
     }
 
     // India data
@@ -266,10 +265,10 @@ function load(files) {
     // Nepal data
     nepal_to_india = {
         'Avadhi': 'Awadhi', 'Oriya': 'Odia', 'Other': 'Other(s)', 'Rajbanshi': 'Rajbangsi', 'Kurux': 'Kurukh/Oraon',
-        'Hariyanvi': 'Haryanvi', 'Santhali': 'Santali'
+        'Hariyanvi': 'Haryanvi', 'Santhali': 'Santali', 'Magahi': 'Magadhi/Magahi'
     }
     nepal_to_broad = {
-        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI'
+        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI', 'Magahi': '6 HINDI'
     }
     ct = 127
     for (var i = 0; i < files[5].length; i++) {
