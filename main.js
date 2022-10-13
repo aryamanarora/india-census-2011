@@ -40,6 +40,7 @@ var sc = d3.scaleLinear()
     .interpolate(() => d3.interpolateRdPu)
 
 var colour = function(x, max=1) {
+    if (x == undefined) return '#eee'
     return sc.domain([0, max])(x)
 }
 
@@ -76,6 +77,7 @@ Promise.all([
     d3.csv("population.csv"),
     d3.json("india-2011.geojson"),
     d3.json("pakistan-2017.geojson"),
+    d3.json("india-5.json"),
     d3.csv("data/pakistan.csv"),
     d3.csv("data/andaman.csv"),
     d3.csv("data/andhra_pradesh.csv"),
@@ -120,14 +122,24 @@ Promise.all([
 function load(files) {
     var population = files[0]
 
-    var map = files[1]
+    var map = files[3]
+
+    // Pakistan
     for (var i = 0; i < files[2].features.length; i++) {
         p = files[2].features[i]
         p.properties.censuscode = p.properties.shapeName.toUpperCase()
         p.properties.DISTRICT = p.properties.shapeName
         map.features.push(p)
     }
+
+    // India
     for (var i = 0; i < map.features.length; i++) {
+        if (!map.features[i].geometry) continue
+        if (!map.features[i].properties.censuscode) {
+            map.features[i].properties.ST_NM = map.features[i].properties.stname
+            map.features[i].properties.DISTRICT = map.features[i].properties.sdtname + ", " + map.features[i].properties.sdtname
+            map.features[i].properties.censuscode = map.features[i].properties.sdtcode11
+        }
         for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
             if (isNaN(d3.polygonArea(map.features[i].geometry.coordinates[j]))) {
                 if (d3.polygonArea(map.features[i].geometry.coordinates[j][0]) < 0)
@@ -146,8 +158,10 @@ function load(files) {
 
     var data = {}, langs = {}
     var num_to_broad_lang = {}
-    for (var i = 4; i < files.length; i++) {
+    for (var i = 5; i < files.length; i++) {
+        var state = undefined, district = undefined
         var data2 = files[i].reduce(function(map, obj) {
+            obj["Area name"] = obj["Area name"].trim()
             var lang = obj["Mother tongue name"].trim()
             if (lang.includes("Others")) {
                 s = lang.split(" ")
@@ -160,8 +174,10 @@ function load(files) {
                 num_to_broad_lang[s[0]] = s[1]
             }
             if (!(lang in langs)) langs[lang] = true
-            if (obj["Sub-"] == "00000") {
-                obj.District = parseInt(obj.District)
+            if (obj.District == "000") state = obj["Area name"]
+            if (obj["Sub-"] == "00000") district = obj["Area name"]
+            if (obj["Sub-"] != "00000") {
+                obj.District = obj["Sub-"]
                 if (!(obj.District in map)) {
                     map[obj.District] = new Proxy({}, {
                         get: (target, name) => name in target ? target[name] : 0
@@ -176,6 +192,7 @@ function load(files) {
         }, {})
         data = {...data, ...data2}
     }
+    console.log(data)
 
     pakistan_to_india = {
         'SINDHI': ['Sindhi', '19 SINDHI'],
@@ -190,8 +207,8 @@ function load(files) {
         'OTHER': ['Other(s)', '124 OTHERS'],
         'total': ['total', 'total']
     }
-    for (var i = 0; i < files[3].length; i++) {
-        d = files[3][i]
+    for (var i = 0; i < files[4].length; i++) {
+        d = files[4][i]
         d.count = parseInt(d.count)
         if (d.subdivision == 'KHANPUR TEHSIL') d.subdivision = 'KHAN PUR TEHSIL'
         if (d.subdivision == 'DE-EXCLUDED AREA RAJANPUR') d.subdivision = 'DE-EXCLUDED AREA RAJANPUR TEHSIL'
@@ -249,7 +266,7 @@ function load(files) {
         entropy_broad[code] = 0.0
         
         sorted[code].forEach(lang => {
-            var p = data[code][lang] / population[code]
+            var p = data[code][lang] / data[code]['total']
             if (p != 0) {
                 if (lang[0] <= "9" && lang[0] >= "0" && !(lang.includes("Others"))) entropy_broad[code] -= p * Math.log2(p)
                 else entropy[code] -= p * Math.log2(p)
@@ -265,13 +282,19 @@ function load(files) {
     dropdown.append("option")
         .text("All (narrow, second-largest)")
     dropdown.append("option")
+        .text("All (broad, second-largest)")
+    dropdown.append("option")
         .text("All (narrow, third-largest)")
+    dropdown.append("option")
+        .text("All (broad, third-largest)")
     dropdown.append("option")
         .text("Diversity (broad)")
     dropdown.append("option")
         .text("Diversity (narrow)")
     dropdown.append("option")
         .text("Diversity erasure (narrow - broad)")
+    dropdown.append("option")
+        .text("Total classified as other")
 
     var sorted_langs = Object.keys(langs)
     sorted_langs.sort((a, b) => {
@@ -349,8 +372,8 @@ function load(files) {
                     .duration(250)
                     .style("opacity", 1)
                 tooltip.html(
-                    "<p><strong>" + d.properties.DISTRICT + (d.properties.ST_NM ? ", " + d.properties.ST_NM : "") + "</strong><br>" +
-                        (population[code] ? population[code].toLocaleString('en-US') : 0) + " people total<br>" +
+                    "<p><strong>" + d.properties.DISTRICT + (d.properties.name_2 ? ", " + d.properties.name_2 : "") + (d.properties.ST_NM ? ", " + d.properties.ST_NM : "") + "</strong><br>" +
+                        (code in data ? data[code]['total'].toLocaleString('en-US') : 0) + " people total<br>" +
                         (text(code) ? text(code) : 0) + "<br>" +
                         "</p>")
                     .style("left", (d3.event.pageX + 15) + "px")
@@ -372,7 +395,7 @@ function load(files) {
         if (!(c in sorted)) return ret
         langs.forEach((d, i) => {
             if (i >= 5) return
-            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (population[c] ? population[c] : 1)).toFixed(2) + "%</td></tr>"
+            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (data[c]['total'] ? data[c]['total'] : 1)).toFixed(2) + "%</td></tr>"
         })
         ret += "</table>"
         return ret
@@ -390,7 +413,7 @@ function load(files) {
         if (!(c in sorted)) return ret
         langs.forEach((d, i) => {
             if (i >= 5) return
-            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (population[c] ? population[c] : 1)).toFixed(2) + "%</td></tr>"
+            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (data[c]['total'] ? data[c]['total'] : 1)).toFixed(2) + "%</td></tr>"
         })
         ret += "</table>"
         return ret
@@ -400,7 +423,7 @@ function load(files) {
         if (lang == "" || lang == "All (broad)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
                 return stringToColour(langs[0])
             }, table_broad)
@@ -408,7 +431,7 @@ function load(files) {
         else if (lang == "All (narrow)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
                 return stringToColour(langs[0])
             }, table_narrow)
@@ -416,53 +439,85 @@ function load(files) {
         else if (lang == "All (narrow, second-largest)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
                 return stringToColour(langs[1])
             }, table_narrow)
         }
+        else if (lang == "All (broad, second-largest)") {
+            d3.selectAll(".legend").remove()
+            reformat(function(c) {
+                if (!(c in data)) return colour(undefined)
+                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
+                return stringToColour(langs[1])
+            }, table_broad)
+        }
         else if (lang == "All (narrow, third-largest)") {
             d3.selectAll(".legend").remove()
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
                 return stringToColour(langs[2])
             }, table_narrow)
         }
+        else if (lang == "All (broad, third-largest)") {
+            d3.selectAll(".legend").remove()
+            reformat(function(c) {
+                if (!(c in data)) return colour(undefined)
+                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
+                return stringToColour(langs[2])
+            }, table_broad)
+        }
         else if (lang == "Diversity (broad)") {
             draw_legend(4, '0 bits', '4')
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 return colour(entropy_broad[c], 4)
             }, table_broad)
         }
         else if (lang == "Diversity (narrow)") {
             draw_legend(4, '0 bits', '4')
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 return colour(entropy[c], 4)
             }, table_narrow)
         }
         else if (lang == "Diversity erasure (narrow - broad)") {
             draw_legend(2.5, '0 bits', '2.5')
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
+                if (!(c in data)) return colour(undefined)
                 return colour(entropy[c] - entropy_broad[c], 2.5)
+            }, table_narrow)
+        }
+        else if (lang == "Total classified as other") {
+            d3.selectAll(".legend").remove()
+            draw_legend(1, '0%', '100%')
+            reformat(function(c) {
+                if (!(c in data)) return colour(undefined)
+                var langs = sorted[c].filter(d => (d.includes("Others") || d.includes("Other(s)")) && d != "total")
+                var sum = 0.0
+                for (lang in langs) {
+                    sum += data[c][langs[lang]]
+                }
+                return colour(sum / data[c]['total'], 1.0)
             }, table_narrow)
         }
         else {
             maximum = 0.0
-            for (c in population) {
-                var p = data[c][lang] / population[c]
+            for (c in data) {
+                if (data[c]['total'] == 0) continue
+                var p = data[c][lang] / data[c]['total']
                 if (p > maximum) maximum = p
             }
             draw_legend(maximum, '0%', (maximum * 100).toFixed(2) + '%')
             reformat(function(c) {
-                if (!(c in data)) return colour(0.0)
-                return colour(data[c][lang] / population[c], maximum)
+                if (!(c in data)) return colour(undefined)
+                if (data[c]['total'] == 0) return colour(undefined)
+                return colour(data[c][lang] / data[c]['total'], maximum)
             }, function(c) {
+                if (!(c in data)) return '?'
                 return data[c][lang].toLocaleString('en-US') + " speakers (" +
-                (data[c][lang] / population[c]).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
+                (data[c][lang] / data[c]['total']).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
             })
         }
     }
