@@ -268,7 +268,8 @@ function load(files) {
         'Hariyanvi': 'Haryanvi', 'Santhali': 'Santali', 'Magahi': 'Magadhi/Magahi'
     }
     nepal_to_broad = {
-        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI', 'Magahi': '6 HINDI'
+        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI', 'Magahi': '6 HINDI',
+        'Other(s)': '124 OTHERS'
     }
     ct = 127
     for (var i = 0; i < files[5].length; i++) {
