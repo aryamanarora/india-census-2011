@@ -79,8 +79,10 @@ Promise.all([
     d3.json("pakistan-2017.geojson"),
     d3.json("india-5.json"),
     d3.json("bangladesh.json"),
+    d3.json("sri-lanka-small.json"),
     d3.csv("data/pakistan.csv"),
     d3.csv("data/nepal.csv"),
+    d3.csv("data/sri_lanka.csv"),
     d3.csv("data/andaman.csv"),
     d3.csv("data/andhra_pradesh.csv"),
     d3.csv("data/arunachal_pradesh.csv"),
@@ -123,7 +125,7 @@ Promise.all([
 
 function load(files) {
     var population = files[0]
-    var offset = 5
+    var offset = 6
     var map = files[3]
 
     // Pakistan
@@ -149,6 +151,15 @@ function load(files) {
         p.properties.censuscode = 'BANGLADESH'
         map.features.push(p)
     }
+
+    // Sri Lanka
+    // for (var i = 0; i < files[5].features.length; i++) {
+    //     p = files[5].features[i]
+    //     p.properties.ST_NM = p.properties.ADM2_EN + ", " + p.properties.ADM1_EN
+    //     p.properties.DISTRICT = p.properties.ADM3_EN
+    //     p.properties.censuscode = p.properties.ADM3_EN
+    //     map.features.push(p)
+    // }
 
     // India
     for (var i = 0; i < map.features.length; i++) {
@@ -182,7 +193,7 @@ function load(files) {
     // India data
     var data = {}, langs = {}
     var num_to_broad_lang = {}, broad_lang_to_num = {}
-    for (var i = offset + 2; i < files.length; i++) {
+    for (var i = offset + 3; i < files.length; i++) {
         var state = undefined, district = undefined
         var data2 = files[i].reduce(function(map, obj) {
             obj["Area name"] = obj["Area name"].trim()
@@ -314,6 +325,27 @@ function load(files) {
         }
     }
 
+    // Sri Lanka data
+    // for (var i = 0; i < files[offset + 2].length; i++) {
+    //     var d = files[offset + 2][i]
+    //     var name = d.Subdivision
+    //     data[name] = {'total': 0, '20 TAMIL': 0, '190 SINHALA': 0, '40 ENGLISH': 0, '124 OTHERS': 0, '191 MALAY': 0}
+    //     for (prop in d) {
+    //         if (prop == 'total' || prop == 'Not reported' || !d[prop]) continue
+    //         d[prop] = parseInt(d[prop])
+    //         if (d[prop] == NaN) continue
+    //         if (prop == 'Subdivision') continue
+    //         data[name][prop] = d[prop]
+    //         data[name].total += d[prop]
+    //         if (prop.includes('Tamil')) data[name]['20 TAMIL'] += d[prop]
+    //         else if (prop.includes('Sinhala')) data[name]['190 SINHALA'] += d[prop]
+    //         else if (prop.includes('European')) data[name]['40 ENGLISH'] += d[prop]
+    //         else if (prop.includes('Malay')) data[name]['191 MALAY'] += d[prop]
+    //         else data[name]['124 OTHERS'] += d[prop]
+    //     }
+    //     console.log(data[name])
+    // }
+
     // Bangladesh data
     data['BANGLADESH'] = {}
     data['BANGLADESH']['Bengali'] = 163507029
@@ -444,18 +476,18 @@ function load(files) {
         g.selectAll("path")
             .attr("fill", d => {
                 var code = d.properties.censuscode
-                if (!code || fill(code) == undefined) return colour(0)
+                if (!code || fill(code) == undefined) return colour(undefined)
                 return fill(code)
             })
             // .attr("stroke", d => {
             //     var code = d.properties.censuscode
-            //     if (!code || fill(code) == undefined) return colour(0)
+            //     if (!code || fill(code) == undefined) return colour(undefined)
             //     return fill(code)
             // })
             // .attr("stroke-width", "0.5px")
             .on("mouseover", function(d) {
                 var code = d.properties.censuscode
-                if (!code) return
+                if (!code || fill(code) == undefined) return
                 tooltip.transition()
                     .duration(250)
                     .style("opacity", 1)
@@ -624,7 +656,7 @@ function load(files) {
             reformat(function(c) {
                 if (!(c in data)) return colour(undefined)
                 if (data[c]['total'] == 0) return colour(undefined)
-                if (!(lang in data[c])) return colour(0)
+                if (!(lang in data[c])) return colour(0 )
                 return colour(data[c][lang] / data[c]['total'], maximum)
             }, function(c) {
                 if (!(c in data)) return '?'
