@@ -187,7 +187,8 @@ function load(files) {
 
     conv = {
         '34299999': '05930', '34199999': '05929', '33599999': '05928', '51899999': '05927',
-        '51999999': '05926', '60399999': '05925'
+        '51999999': '05926', '60399999': '05925',
+        '31202078': '02077' // Jorhat
     }
 
     // India data
@@ -221,8 +222,8 @@ function load(files) {
                     })
                     map[obj.District]['total'] = 0
                 }
-                map[obj.District][lang] = parseInt(obj["Total"])
-                if (lang == '124 OTHERS') map[obj.District]["Other(s)"] = parseInt(obj["Total"])
+                map[obj.District][lang] += parseInt(obj["Total"])
+                if (lang == '124 OTHERS') map[obj.District]["Other(s)"] += parseInt(obj["Total"])
                 if (lang[0] <= "9" && lang[0] >= "0" && !lang.includes("Others")) map[obj.District]["total"] += parseInt(obj["Total"])
             }
             return map
@@ -458,18 +459,22 @@ function load(files) {
         .attr("d", d => {
             return path(d)
         })
+        .attr("id", d => {
+            console.log(d)
+            return "d_" + d.properties.censuscode
+        })
         .attr("opacity", 1)
         .on("mousemove", function (d) {
             tooltip
                 .style("left", (d3.event.pageX + 15) + "px")
                 .style("top", (d3.event.pageY - 28) + "px")
-            d3.select(this).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
+            d3.selectAll("#d_" + d.properties.censuscode).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
         })
         .on("mouseout", function (d) {
             tooltip.transition()
                 .duration(250)
                 .style("opacity", 0)
-            d3.select(this).attr("stroke", null).attr("stroke-width", null).lower()
+            d3.selectAll("#d_" + d.properties.censuscode).attr("stroke", null).attr("stroke-width", null).lower()
         })
 
     function reformat(fill, text) {
