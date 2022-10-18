@@ -168,6 +168,7 @@ function load(files) {
             map.features[i].properties.ST_NM = map.features[i].properties.stname
             map.features[i].properties.DISTRICT = map.features[i].properties.sdtname + ", " + map.features[i].properties.dtname
             map.features[i].properties.censuscode = map.features[i].properties.sdtcode11
+            if (map.features[i].properties.ST_NM == 'ASSAM') map.features[i].properties.censuscode = map.features[i].properties.dtcode11 + map.features[i].properties.sdtcode11
         }
         for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
             if (isNaN(d3.polygonArea(map.features[i].geometry.coordinates[j]))) {
@@ -215,6 +216,7 @@ function load(files) {
             if (obj["Sub-"] == "00000") district = obj["Area name"]
             if (obj["Sub-"] != "00000") {
                 if (obj.District + obj["Sub-"] in conv) obj["Sub-"] = conv[obj.District + obj["Sub-"]]
+                if (state == "ASSAM") obj["Sub-"] = obj.District + obj["Sub-"]
                 obj.District = obj["Sub-"]
                 if (!(obj.District in map)) {
                     map[obj.District] = new Proxy({}, {
