@@ -126,7 +126,7 @@ Promise.all([
 function load(files) {
     var population = files[0]
     var offset = 6
-    var map = files[3]
+    var map = {"type": "FeatureCollection", "features": []}
 
     // Pakistan
     for (var i = 0; i < files[2].features.length; i++) {
@@ -162,14 +162,19 @@ function load(files) {
     // }
 
     // India
-    for (var i = 0; i < map.features.length; i++) {
-        if (!map.features[i].geometry) continue
-        if (!map.features[i].properties.censuscode) {
-            map.features[i].properties.ST_NM = map.features[i].properties.stname
-            map.features[i].properties.DISTRICT = map.features[i].properties.sdtname + ", " + map.features[i].properties.dtname
-            map.features[i].properties.censuscode = map.features[i].properties.sdtcode11
-            if (map.features[i].properties.ST_NM == 'ASSAM') map.features[i].properties.censuscode = map.features[i].properties.dtcode11 + map.features[i].properties.sdtcode11
+    for (var i = 0; i < files[3].features.length; i++) {
+        p = files[3].features[i]
+        if (!p.geometry) continue
+        if (!p.properties.censuscode) {
+            p.properties.ST_NM = p.properties.stname
+            p.properties.DISTRICT = p.properties.sdtname + ", " + p.properties.dtname
+            p.properties.censuscode = p.properties.sdtcode11
+            if (p.properties.ST_NM == 'ASSAM') p.properties.censuscode = p.properties.dtcode11 + p.properties.sdtcode11
         }
+        map.features.push(p)
+    }
+
+    for (var i = 0; i < map.features.length; i++) {
         for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
             if (isNaN(d3.polygonArea(map.features[i].geometry.coordinates[j]))) {
                 if (d3.polygonArea(map.features[i].geometry.coordinates[j][0]) < 0)
@@ -463,20 +468,20 @@ function load(files) {
         })
         .attr("id", d => {
             console.log(d)
-            return "d_" + d.properties.censuscode
+            return "d_" + d.properties.censuscode.toString().replace(" ", "_")
         })
         .attr("opacity", 1)
         .on("mousemove", function (d) {
             tooltip
                 .style("left", (d3.event.pageX + 15) + "px")
                 .style("top", (d3.event.pageY - 28) + "px")
-            d3.selectAll("#d_" + d.properties.censuscode).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
+            d3.selectAll("#d_" + d.properties.censuscode.toString().replace(" ", "_")).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
         })
         .on("mouseout", function (d) {
             tooltip.transition()
                 .duration(250)
                 .style("opacity", 0)
-            d3.selectAll("#d_" + d.properties.censuscode).attr("stroke", null).attr("stroke-width", null).lower()
+            d3.selectAll("#d_" + d.properties.censuscode.toString().replace(" ", "_")).attr("stroke", null).attr("stroke-width", null).lower()
         })
 
     function reformat(fill, text) {
