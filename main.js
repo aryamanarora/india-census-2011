@@ -3,7 +3,7 @@
 //   dist/data.json  language counts and derived stats per unit
 // Everything about joining census rows to polygons lives in build.mjs; this file draws.
 
-const DOT_POP = 10000 // one dot per this many speakers
+const DOT_POP = 100000 // one dot per this many speakers
 const SINGLE = '__single__' // the "Show" value used while a single language is picked
 
 const VIEWS = [
@@ -526,14 +526,16 @@ function start(map, { languages, units, asides }) {
     // ------------------------------------------------------------ dots
 
     // Where can a dot go? Rasterise every unit once into an offscreen canvas, each filled
-    // with its own slot number as a colour. Then place a dot by throwing a random point at
-    // the unit's bounding box and keeping it if that pixel belongs to the unit — a single
-    // array lookup, not a point-in-polygon test against thousands of vertices (which took
-    // 37 seconds for the whole map). Rejection keeps the dots spread continuously across the
-    // polygon; snapping them to pixel centres instead piled a small tehsil's dots onto its
-    // handful of interior pixels and they clumped.
-    const SS = 2 // supersample the buffer, so small tehsils resolve to more than a few pixels
-    let picking = null  // { w, h, slot: Int32Array, slotOf: Map, bbox: Map }
+    // with its own slot number as a colour, and record the pixels each unit owns. A dot is
+    // then a random one of those pixels plus sub-pixel jitter — always inside the polygon,
+    // and cheap (no point-in-polygon test against thousands of vertices, which took 37s for
+    // the whole map). Supersampling gives even small tehsils enough pixels that their dots
+    // spread out instead of piling up; sampling owned pixels directly, rather than
+    // rejection-sampling a bounding box, means a thin or scattered unit never loses its dots
+    // to a fallback point.
+    const SS = 3 // supersample factor for the buffer
+    let pixelsOf = null // unit id -> Int32Array of packed y*w+x in supersample space
+    let sampleW = 0     // buffer width
     let pixelsFor = 0   // the projection these were computed against
 
     function samplePixels() {
@@ -559,22 +561,23 @@ function start(map, { languages, units, asides }) {
         ctx.restore()
 
         const px = ctx.getImageData(0, 0, w, h).data
-        const slot = new Int32Array(w * h)
-        const bbox = new Map() // unit id -> [x0, y0, x1, y1] in supersample space
-        for (let p = 0; p < slot.length; p++) {
+        const lists = new Map() // unit id -> number[]
+        for (let p = 0; p < w * h; p++) {
+            // Interior pixels decode to exactly a slot value; anti-aliased edges blend to
+            // some other number and are skipped, which keeps dots off the borders.
             const s = (px[p * 4] << 16) | (px[p * 4 + 1] << 8) | px[p * 4 + 2]
             if (!s || s > unitOfSlot.length) continue
-            slot[p] = s
-            const x = p % w, y = (p / w) | 0
-            const b = bbox.get(unitOfSlot[s - 1])
-            if (!b) bbox.set(unitOfSlot[s - 1], [x, y, x, y])
-            else { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y }
+            const id = unitOfSlot[s - 1]
+            const list = lists.get(id) ?? (lists.set(id, []).get(id))
+            list.push(p)
         }
-        picking = { w, h, slot, slotOf, bbox }
+        pixelsOf = new Map()
+        for (const [id, list] of lists) pixelsOf.set(id, Int32Array.from(list))
+        sampleW = w
         pixelsFor = projection.scale()
     }
 
-    // A unit too small to hold a pixel still gets its dots, at its centroid.
+    // A unit too small to own a pixel still gets its dots, at its centroid.
     const centroidOf = new Map()
     for (const f of map.features)
         if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
@@ -596,7 +599,7 @@ function start(map, { languages, units, asides }) {
                 if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
         }
 
-        const { w, slot, slotOf, bbox } = picking
+        const w = sampleW
         const byLang = new Map() // language id -> one path 'd' string of many dots
         const ids = Object.keys(units)
         let total = 0
@@ -610,10 +613,9 @@ function start(map, { languages, units, asides }) {
                 if (mine !== generation) return // superseded by a newer selection
             }
             const u = units[ids[i]]
-            const s = slotOf.get(ids[i])
-            const b = bbox.get(ids[i])
+            const pool = pixelsOf.get(ids[i])
             const centre = centroidOf.get(ids[i])
-            if (!b && !centre) continue
+            if ((!pool || !pool.length) && !centre) continue
 
             for (const id of spec.langs(u)) {
                 let n = Math.round(u.L[id] / DOT_POP)
@@ -621,15 +623,14 @@ function start(map, { languages, units, asides }) {
                 total += n
                 let d = byLang.get(id) || ''
                 while (n--) {
-                    let x, y, hit = false
-                    if (b) {
-                        const spanX = b[2] - b[0] + 1, spanY = b[3] - b[1] + 1
-                        for (let t = 0; t < 48 && !hit; t++) {
-                            const fx = b[0] + Math.random() * spanX, fy = b[1] + Math.random() * spanY
-                            if (slot[((fy | 0) * w) + (fx | 0)] === s) { x = fx / SS; y = fy / SS; hit = true }
-                        }
+                    let x, y
+                    if (pool && pool.length) {
+                        const p = pool[(Math.random() * pool.length) | 0]
+                        x = ((p % w) + Math.random()) / SS
+                        y = (((p / w) | 0) + Math.random()) / SS
+                    } else {
+                        [x, y] = centre // sub-pixel unit
                     }
-                    if (!hit) { if (!centre) continue; [x, y] = centre } // sliver too thin to hit
                     d += `M${x.toFixed(1)} ${y.toFixed(1)}l0 .01`
                 }
                 byLang.set(id, d)
