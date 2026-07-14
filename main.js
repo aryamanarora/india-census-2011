@@ -525,54 +525,56 @@ function start(map, { languages, units, asides }) {
 
     // ------------------------------------------------------------ dots
 
-    // Where can a dot go? Rasterise every polygon once into an offscreen canvas, each
-    // filled with its own index as a colour, and keep the pixels each unit owns. Sampling
-    // a pixel uniformly is then automatically area-weighted, and costs nothing.
-    //
-    // The alternative — throwing random points at a polygon until one lands inside — pays
-    // a point-in-polygon test per attempt against geometry with thousands of vertices.
-    // That took 37 seconds for the whole map. This takes about half of one.
-    let pixelsOf = null // unit id -> Int32Array of packed y*width+x
+    // Where can a dot go? Rasterise every unit once into an offscreen canvas, each filled
+    // with its own slot number as a colour. Then place a dot by throwing a random point at
+    // the unit's bounding box and keeping it if that pixel belongs to the unit — a single
+    // array lookup, not a point-in-polygon test against thousands of vertices (which took
+    // 37 seconds for the whole map). Rejection keeps the dots spread continuously across the
+    // polygon; snapping them to pixel centres instead piled a small tehsil's dots onto its
+    // handful of interior pixels and they clumped.
+    const SS = 2 // supersample the buffer, so small tehsils resolve to more than a few pixels
+    let picking = null  // { w, h, slot: Int32Array, slotOf: Map, bbox: Map }
     let pixelsFor = 0   // the projection these were computed against
 
     function samplePixels() {
+        const w = Math.round(width * SS), h = Math.round(height * SS)
         const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
+        canvas.width = w
+        canvas.height = h
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         const draw = d3.geoPath().projection(projection).context(ctx)
 
-        map.features.forEach((f, i) => {
+        const slotOf = new Map(), unitOfSlot = [] // one slot per unit, shared by its polygons
+        for (const f of map.features)
+            if (!slotOf.has(f.properties.id)) { unitOfSlot.push(f.properties.id); slotOf.set(f.properties.id, unitOfSlot.length) }
+
+        ctx.save()
+        ctx.scale(SS, SS)
+        for (const f of map.features) {
             ctx.beginPath()
             draw(f)
-            // index+1 as a 24-bit colour, so pixel colour identifies the polygon
-            ctx.fillStyle = '#' + (i + 1).toString(16).padStart(6, '0')
+            ctx.fillStyle = '#' + slotOf.get(f.properties.id).toString(16).padStart(6, '0')
             ctx.fill()
-        })
-
-        const px = ctx.getImageData(0, 0, width, height).data
-        const at = p => (px[p * 4] << 16) | (px[p * 4 + 1] << 8) | px[p * 4 + 2]
-
-        const buckets = new Map()
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                const p = y * width + x
-                const v = at(p)
-                if (!v || v > map.features.length) continue
-                // Anti-aliased edge pixels blend two polygons' colours into a third
-                // polygon's index. Keep only pixels whose neighbours agree.
-                if (at(p - 1) !== v || at(p + 1) !== v || at(p - width) !== v || at(p + width) !== v) continue
-                const id = map.features[v - 1].properties.id
-                if (!buckets.has(id)) buckets.set(id, [])
-                buckets.get(id).push(p)
-            }
         }
-        for (const [id, list] of buckets) buckets.set(id, Int32Array.from(list))
-        pixelsOf = buckets
+        ctx.restore()
+
+        const px = ctx.getImageData(0, 0, w, h).data
+        const slot = new Int32Array(w * h)
+        const bbox = new Map() // unit id -> [x0, y0, x1, y1] in supersample space
+        for (let p = 0; p < slot.length; p++) {
+            const s = (px[p * 4] << 16) | (px[p * 4 + 1] << 8) | px[p * 4 + 2]
+            if (!s || s > unitOfSlot.length) continue
+            slot[p] = s
+            const x = p % w, y = (p / w) | 0
+            const b = bbox.get(unitOfSlot[s - 1])
+            if (!b) bbox.set(unitOfSlot[s - 1], [x, y, x, y])
+            else { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y }
+        }
+        picking = { w, h, slot, slotOf, bbox }
         pixelsFor = projection.scale()
     }
 
-    // A unit too small to own a whole pixel still gets its dots, at its centroid.
+    // A unit too small to hold a pixel still gets its dots, at its centroid.
     const centroidOf = new Map()
     for (const f of map.features)
         if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
@@ -594,6 +596,7 @@ function start(map, { languages, units, asides }) {
                 if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
         }
 
+        const { w, slot, slotOf, bbox } = picking
         const byLang = new Map() // language id -> one path 'd' string of many dots
         const ids = Object.keys(units)
         let total = 0
@@ -607,9 +610,10 @@ function start(map, { languages, units, asides }) {
                 if (mine !== generation) return // superseded by a newer selection
             }
             const u = units[ids[i]]
-            const pool = pixelsOf.get(ids[i])
+            const s = slotOf.get(ids[i])
+            const b = bbox.get(ids[i])
             const centre = centroidOf.get(ids[i])
-            if (!pool && !centre) continue
+            if (!b && !centre) continue
 
             for (const id of spec.langs(u)) {
                 let n = Math.round(u.L[id] / DOT_POP)
@@ -617,14 +621,15 @@ function start(map, { languages, units, asides }) {
                 total += n
                 let d = byLang.get(id) || ''
                 while (n--) {
-                    let x, y
-                    if (pool && pool.length) {
-                        const p = pool[(Math.random() * pool.length) | 0]
-                        x = (p % width) + Math.random()
-                        y = ((p / width) | 0) + Math.random()
-                    } else {
-                        [x, y] = centre
+                    let x, y, hit = false
+                    if (b) {
+                        const spanX = b[2] - b[0] + 1, spanY = b[3] - b[1] + 1
+                        for (let t = 0; t < 48 && !hit; t++) {
+                            const fx = b[0] + Math.random() * spanX, fy = b[1] + Math.random() * spanY
+                            if (slot[((fy | 0) * w) + (fx | 0)] === s) { x = fx / SS; y = fy / SS; hit = true }
+                        }
                     }
+                    if (!hit) { if (!centre) continue; [x, y] = centre } // sliver too thin to hit
                     d += `M${x.toFixed(1)} ${y.toFixed(1)}l0 .01`
                 }
                 byLang.set(id, d)
