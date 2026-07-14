@@ -231,8 +231,9 @@ for (const rows of indiaTables) {
         // Assam's sub-district codes repeat across districts, so its ids carry the
         // district prefix — applied after the fix, not before.
         const fixed = INDIA_FIXES.get(district + sub) ?? sub
+        const dtKey = 'IN' + district
         let unitId
-        if (isAside) unitId = 'A' + district
+        if (isAside) unitId = 'A:' + dtKey
         else if (coarse) unitId = 'D' + district
         else if (stateName === 'ASSAM') unitId = district + fixed
         else unitId = fixed
@@ -241,7 +242,11 @@ for (const rows of indiaTables) {
             country: 'IN',
             coarse: coarse || undefined,
             aside: isAside || undefined,
+            dtKey, // district this unit belongs to, for folding no-polygon units into asides
             dtcode: district, // `district` itself gets the district's name, from the shapefile
+            // the census's own name for this unit — the only label an orphan (no polygon) has
+            censusName: areaName.trim(),
+            censusState: titleCase(stateName),
         })
         const n = parseInt(totalP) || 0
         const name = mtName.trim()
@@ -300,27 +305,31 @@ const pkSubRows = pkRows.filter(r => r.subdivision !== r.district)
 const pkDistrictRows = pkRows.filter(r => r.subdivision === r.district)
 
 // The shapefile predates the 2017 census, which split new tehsils out (Lahore's Model
-// Town, Shalimar and Raiwind have no polygon). Where a district's sub-divisions don't all
-// have polygons, draw the district's own figures on whatever polygons it does have,
-// rather than dropping those 10 million people off the map.
-const pkSubsOfDistrict = new Map()
-for (const r of pkSubRows) {
-    const id = pkSubdivision(r)
-    if (!pkSubsOfDistrict.has(r.district)) pkSubsOfDistrict.set(r.district, new Set())
-    pkSubsOfDistrict.get(r.district).add(id)
+// Town, Shalimar and Raiwind have no polygon). A tehsil with a polygon is drawn on its own;
+// one without becomes a no-polygon unit that the folding pass below turns into an aside on
+// its district. But where the tehsils that *do* have polygons cover less than half the
+// district — Lahore keeps only its two smallest — that leaves a caricature, so draw the
+// whole district coarse instead (the same rule India uses for Bangalore).
+const pkDistrictPop = new Map(), pkDrawablePop = new Map()
+for (const r of pkRows) {
+    if (r.language !== 'TOTAL') continue
+    const n = parseInt(r.count) || 0
+    if (r.subdivision === r.district) pkDistrictPop.set(r.district, n)
+    else if (pkShapes.has(pkSubdivision(r)))
+        pkDrawablePop.set(r.district, (pkDrawablePop.get(r.district) || 0) + n)
 }
 const pkCoarse = new Set()
-for (const [district, subs] of pkSubsOfDistrict)
-    if ([...subs].some(id => !pkShapes.has(id))) {
+for (const [district, total] of pkDistrictPop)
+    if ((pkDrawablePop.get(district) || 0) < 0.5 * total) {
         pkCoarse.add(district)
-        COARSE_REASON.set('PK' + district, 'some sub-divisions have no polygon')
+        COARSE_REASON.set('PK' + district, 'most of the district has no sub-division polygon')
     }
 
-// polygon name -> the district unit it should carry
+// For a coarse district, its matched-tehsil polygons carry the whole-district figures.
 const PK_POLYGON_UNIT = new Map()
-for (const [district, subs] of pkSubsOfDistrict) {
-    if (!pkCoarse.has(district)) continue
-    for (const id of subs) if (pkShapes.has(id)) PK_POLYGON_UNIT.set(id, 'PK' + district)
+for (const r of pkSubRows) {
+    const id = pkSubdivision(r)
+    if (pkCoarse.has(r.district) && pkShapes.has(id)) PK_POLYGON_UNIT.set(id, 'PK' + r.district)
 }
 
 for (const row of [...pkSubRows, ...pkDistrictRows]) {
@@ -334,6 +343,7 @@ for (const row of [...pkSubRows, ...pkDistrictRows]) {
         district: coarse ? undefined : titleCase(row.district),
         state: titleCase(row.province),
         coarse: coarse || undefined,
+        dtKey: coarse ? undefined : 'PK' + row.district,
     })
     const n = parseInt(row.count) || 0
     if (row.language === 'TOTAL') { u.total = n; continue }
@@ -348,6 +358,7 @@ for (const row of [...pkSubRows, ...pkDistrictRows]) {
 const NP_LANGS = readObjects('crosswalk/nepal_language_map.csv')
 
 for (const row of readObjects('data/nepal.csv')) {
+    if (row.admin2_name.startsWith('#')) continue // HXL tag row, not data
     const id = row.admin2_name.toUpperCase() + '_NEPAL'
     const total = parseInt(row.pop_total) || 0
     const u = unit(id, { country: 'NP', name: row.admin2_name, state: row.admin1_name })
@@ -403,9 +414,10 @@ function stats(u) {
     }
 }
 
-for (const u of Object.values(units)) Object.assign(u, stats(u))
-
-// Language totals are computed further down, once we know which units have a polygon —
+// Per-unit stats (ranking, entropy) are computed after the folding pass below, once every
+// aside has all the people that belong to it.
+//
+// Language totals are computed further down too, once we know which units have a polygon —
 // they have to count exactly the people the map can show, or the legend won't reconcile
 // with the map underneath it.
 
@@ -513,6 +525,35 @@ for (const f of features) {
     u.state = f.properties.state
 }
 
+// ---------------------------------------------------------------- fold orphans into asides
+
+// A unit with no polygon can't be drawn, but its people needn't vanish. If its district has
+// at least one unit that IS drawn, fold it into that district's aside — the extra table the
+// tooltip already shows for municipal areas the census keeps outside any sub-district. This
+// covers sub-districts the shapefile is missing (Budaun, Shimla city) and the new Pakistani
+// tehsils that predate the shapefile (Lahore's Model Town). A unit whose whole district is
+// undrawable (the FATA Frontier Regions) has nowhere to attach and stays a true orphan.
+const drawnDistricts = new Set()
+for (const [id, u] of Object.entries(units))
+    if (geoIds.has(id) && u.dtKey) drawnDistricts.add(u.dtKey)
+
+let folded = 0, foldedPop = 0
+for (const [id, u] of Object.entries(units)) {
+    if (geoIds.has(id) || u.aside || !u.dtKey) continue // drawn, already an aside, or unfoldable
+    if (!drawnDistricts.has(u.dtKey)) continue           // no drawn sibling to attach to
+    const akey = 'A:' + u.dtKey
+    const a = units[akey] ?? (units[akey] = {
+        country: u.country, aside: true, dtKey: u.dtKey, total: 0, langs: {},
+    })
+    for (const [lid, n] of Object.entries(u.langs)) a.langs[lid] = (a.langs[lid] || 0) + n
+    a.total += u.total
+    folded++
+    foldedPop += u.total
+    delete units[id] // subsumed by the aside; no longer a standalone orphan
+}
+
+for (const u of Object.values(units)) Object.assign(u, stats(u))
+
 // ---------------------------------------------------------------- language totals
 
 // Count only units the map can actually show: those with a polygon, plus the municipal
@@ -554,12 +595,14 @@ const people = xs => xs.reduce((s, [, u]) => s + u.total, 0)
 const lost = people(orphans.map(id => [id, units[id]]))
 console.log(`\npopulation on the map: ${people(mapped).toLocaleString()}`)
 if (asideUnits.length)
-    console.log(`  ${asideUnits.length} municipal areas the census puts in no sub-district — ${asideUnits.reduce((s, u) => s + u.total, 0).toLocaleString()} people — have no polygon and are shown in the tooltip of their district instead`)
+    console.log(`  ${asideUnits.length} districts have no-polygon population (municipal areas, missing tehsils, folded orphans) — ${asideUnits.reduce((s, u) => s + u.total, 0).toLocaleString()} people — shown in the tooltip of a drawn sibling (${folded} orphan units folded in)`)
 if (orphans.length) {
-    console.log(`  ${orphans.length} census units have no polygon — ${lost.toLocaleString()} people are on no map:`)
-    for (const id of orphans.sort((a, b) => units[b].total - units[a].total).slice(0, 10))
-        console.log(`      ${id.padEnd(10)} ${units[id].total.toLocaleString().padStart(12)} people`)
-    if (orphans.length > 10) console.log(`      ... and ${orphans.length - 10} more`)
+    console.log(`  ${orphans.length} census units have no polygon and no drawn sibling — ${lost.toLocaleString()} people are on no map:`)
+    for (const id of orphans.sort((a, b) => units[b].total - units[a].total)) {
+        const u = units[id]
+        const label = [u.censusName || u.name, u.censusState || u.state].filter(Boolean).join(', ')
+        console.log(`      ${id.padEnd(10)} ${u.total.toLocaleString().padStart(11)}  ${label}`)
+    }
 }
 const coarse = mapped.filter(([, u]) => u.coarse)
 if (coarse.length) {
@@ -587,8 +630,8 @@ for (const [id, u] of Object.entries(units)) {
         kb: u.nBroad, kn: u.nNarrow, o: +u.otherShare.toFixed(5),
         rb: u.rankBroad.slice(0, 8), rn: u.rankNarrow.slice(0, 8),
         x: u.coarse ? 1 : undefined, // district-level, no sub-district breakdown
-        // the people of this district that the census puts in no sub-district
-        a: aside.has(u.dtcode) ? 'A' + u.dtcode : undefined,
+        // the people of this district who are on no polygon (municipal areas, missing tehsils)
+        a: u.dtKey && units['A:' + u.dtKey] ? 'A:' + u.dtKey : undefined,
     }
 }
 

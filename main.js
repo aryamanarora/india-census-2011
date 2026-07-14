@@ -327,9 +327,10 @@ function start(map, { languages, units, asides }) {
         const bits = (kind === 'broad' ? u.eb : u.en).toFixed(2)
         const noun = kind === 'broad' ? 'languages' : 'mother tongues'
 
-        // The census reports some of this district's people — a municipal corporation —
-        // outside any sub-district, so they are on no polygon anywhere. Show them next to
-        // the tehsil rather than letting them vanish.
+        // Some of this district's people are on no polygon — a municipal corporation the
+        // census keeps outside any sub-district, a sub-district the shapefile is missing, a
+        // tehsil created after it was drawn. Show them next to whichever unit is hovered
+        // rather than letting them vanish.
         const a = u.a && asides[u.a]
         const aRank = a ? rankAll(a.L, kind) : []
 
@@ -343,8 +344,8 @@ function start(map, { languages, units, asides }) {
             </div>
             ${u.x ? '<div class="note">Shown at district level: the census gives no usable sub-district breakdown here.</div>' : ''}
             ${a ? `<div class="aside">
-                <div class="where">Plus ${fmt(a.t)} people in ${u.d || 'this'} district that the census
-                    places in no sub-district (its towns), and so are on no polygon:</div>
+                <div class="where">Plus ${fmt(a.t)} people elsewhere in ${u.d || 'this'} district
+                    with no polygon of their own (towns, or areas the shapefile is missing):</div>
                 <div class="split">
                     ${ring(aRank, a.L, a.t, 20)}
                     <div class="grow scroll short">${table(aRank, a.L, a.t)}</div>
