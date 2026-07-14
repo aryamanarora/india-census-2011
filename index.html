@@ -1,63 +1,156 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
     <head>
-        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
-        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Languages of South Asia</title>
+        <meta name="description" content="Mother tongues of India, Pakistan, Nepal and Bangladesh, mapped from census returns.">
         <script src="https://d3js.org/d3.v5.min.js"></script>
-        <script src="https://unpkg.com/topojson@3"></script>
-        <script src="https://code.jquery.com/jquery-3.4.1.slim.min.js" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
-        <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js" integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" crossorigin="anonymous"></script>    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-52207113-1"></script>
-        <script>
-          window.dataLayer = window.dataLayer || [];
-          function gtag(){dataLayer.push(arguments);}
-          gtag('js', new Date());
-        
-          gtag('config', 'UA-52207113-1');
-        </script>
         <style>
+            :root {
+                --bg: #f7f7f5;
+                --panel: #ffffff;
+                --ink: #1b1b1b;
+                --muted: #6b6b6b;
+                --line: #d9d9d6;
+                --nodata: #e8e8e6;
+                --land: #dcdcd6;
+            }
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --bg: #17181a;
+                    --panel: #212327;
+                    --ink: #ececec;
+                    --muted: #9a9a9a;
+                    --line: #3a3c40;
+                    --nodata: #2b2d31;
+                    --land: #35383d;
+                }
+            }
+
+            * { box-sizing: border-box; }
+            html, body { height: 100%; }
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--ink);
+                font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+                overflow: hidden;
+            }
+
+            #map { display: block; width: 100vw; height: 100vh; cursor: grab; }
+            #map:active { cursor: grabbing; }
+            #map path { vector-effect: non-scaling-stroke; }
+            #map path.hover { stroke: var(--ink); stroke-width: 1.2px; }
+            #dots path { fill: none; stroke-width: 1.6px; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+
+            .panel {
+                position: absolute;
+                top: 16px; left: 16px;
+                width: 330px;
+                max-height: calc(100vh - 32px);
+                display: flex;
+                flex-direction: column;
+                background: var(--panel);
+                border: 1px solid var(--line);
+                border-radius: 10px;
+                box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+            }
+            .panel > * { padding: 0 16px; }
+            .panel header { padding-top: 14px; }
+            h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+            .sub { margin: 3px 0 12px; color: var(--muted); font-size: 12.5px; }
+
+            .controls { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 12px; }
+            label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+                    letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }
+            select, input[type=search] {
+                width: 100%; padding: 7px 8px; margin-bottom: 10px;
+                font: inherit; font-size: 13.5px;
+                color: var(--ink); background: var(--bg);
+                border: 1px solid var(--line); border-radius: 6px;
+            }
+            select:focus, input:focus { outline: 2px solid #6b8fd6; outline-offset: -1px; }
+            .check { display: flex; align-items: center; gap: 7px; }
+            .check input { margin: 0; }
+            .check label { margin: 0; text-transform: none; font-size: 13px; font-weight: 400;
+                           letter-spacing: 0; color: var(--ink); }
+
+            .legend { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 14px;
+                      overflow-y: auto; font-size: 12.5px; }
+            .legend .row { display: flex; align-items: center; gap: 8px; padding: 1.5px 0; }
+            .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+            .legend .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .legend .fam { color: var(--muted); font-size: 11px; }
+            .legend .ramp { height: 10px; border-radius: 3px; margin: 4px 0 3px; }
+            .legend .ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+            .status { color: var(--muted); font-size: 12px; padding-top: 6px; min-height: 18px; }
+
             .tooltip {
-                position: absolute;
-                padding: 10px;
-                margin: 10px;
-                font-size: 0.9em;
-                pointer-events: none;
-                background: #fff;
-                border: 1px solid #ccc;
-                border-radius: 4px;
+                position: absolute; pointer-events: none; opacity: 0;
+                min-width: 250px; max-width: 320px; padding: 9px 11px;
+                background: var(--panel); color: var(--ink);
+                border: 1px solid var(--line); border-radius: 8px;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+                font-size: 12.5px; transition: opacity 120ms;
+            }
+            .tooltip h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
+            .tooltip .where, .tooltip .note { color: var(--muted); font-size: 11.5px; }
+            .tooltip .note { margin-top: 5px; font-style: italic; }
+            .tooltip .split { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+            .tooltip .split svg { flex: none; }
+            .tooltip .grow { flex: 1; min-width: 0; }
+            .tooltip table { width: 100%; border-collapse: collapse; }
+            .tooltip td { padding: 1px 0; white-space: nowrap; }
+            .tooltip td:first-child { overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 99%; }
+            .tooltip td:nth-child(2), .tooltip td:nth-child(3) { text-align: right;
+                font-variant-numeric: tabular-nums; padding-left: 8px; }
+            .tooltip td:nth-child(3) { color: var(--muted); }
+            .tooltip .chip { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+                margin-right: 5px; vertical-align: baseline; }
+            .tooltip .aside { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--line); }
 
-                -moz-box-shadow:    3px 3px 10px 0px rgba(0, 0, 0, 0.25);
-                -webkit-box-shadow: 3px 3px 10px 0px rgba(0, 0, 0, 0.25);
-                box-shadow:         3px 3px 10px 0px rgba(0, 0, 0, 0.25);
-            }
+            footer { padding-bottom: 12px; font-size: 11px; color: var(--muted); }
+            footer a { color: var(--muted); }
 
-            .tooltip p {
-                margin: 0;
-                padding: 0;
-            }
-
-            .tooltip table {
-                margin: 0;
-                padding: 0;
-                border-collapse: collapse;
-            }
-            .indicator {
-                position: absolute;
-                background-color: white;
-                max-width: 300px;
-                opacity: 20%;
-            }
-            .indicator:hover {
-                opacity: 100%;
+            @media (max-width: 640px) {
+                .panel { width: auto; left: 8px; right: 8px; top: 8px; max-height: 60vh; }
             }
         </style>
     </head>
     <body>
-        <div class="indicator row card bg-dark text-white mt-3 ml-3 shadow p-3">
-            <h1>Languages of South Asia</h1>
-            <p class="text-white-50">Data from the censuses of India (2011), Pakistan (2017), and Nepal (2011).</p>
-        </div>
         <svg id="map"></svg>
+
+        <div class="panel">
+            <header>
+                <h1>Languages of South Asia</h1>
+                <p class="sub">Mother tongues from the censuses of India&nbsp;(2011), Pakistan&nbsp;(2017),
+                    Nepal&nbsp;(2011) and Bangladesh&nbsp;(2011).</p>
+            </header>
+
+            <div class="controls">
+                <label for="view">Show</label>
+                <select id="view"></select>
+
+                <label for="lang">Or a single language</label>
+                <input id="lang" type="search" list="langlist" placeholder="Search 600+ mother tongues…" autocomplete="off">
+                <datalist id="langlist"></datalist>
+
+                <div class="check">
+                    <input type="checkbox" id="dots">
+                    <label for="dots">Dot density (1 dot = 100,000 speakers)</label>
+                </div>
+                <div class="status" id="status">Loading…</div>
+            </div>
+
+            <div class="legend" id="legend"></div>
+
+            <footer>
+                Grey areas have no census data.
+                <a href="https://github.com/aryamanarora/india-census-2011">Source and method</a>.
+            </footer>
+        </div>
+
         <script src="main.js"></script>
     </body>
 </html>

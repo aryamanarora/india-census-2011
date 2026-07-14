@@ -1,680 +1,520 @@
-var width = window.innerWidth, height = window.innerHeight;
-var container = d3.select("#map")
-    .attr("width", width)
-    .attr("height", height)
+// Languages of South Asia. Reads the artefacts built by build.mjs:
+//   dist/map.json   merged geometry, one feature per census unit
+//   dist/data.json  language counts and derived stats per unit
+// Everything about joining census rows to polygons lives in build.mjs; this file draws.
 
-var projection = d3.geoMercator()
-    .rotate([-78.9629, -20.5937, 0])
-    .scale(1500)
-    .translate([width / 2, height / 2])
+const DOT_POP = 100000 // one dot per this many speakers
+const SINGLE = '__single__' // the "Show" value used while a single language is picked
 
-var path = d3.geoPath()
-    .projection(projection)
+const VIEWS = [
+    { id: 'top1.b', label: 'Largest language' },
+    { id: 'top1.n', label: 'Largest mother tongue' },
+    { id: 'top2.b', label: 'Second largest language' },
+    { id: 'top2.n', label: 'Second largest mother tongue' },
+    { id: 'top3.b', label: 'Third largest language' },
+    { id: 'top3.n', label: 'Third largest mother tongue' },
+    { id: 'count.b', label: 'Number of languages spoken' },
+    { id: 'count.n', label: 'Number of mother tongues spoken' },
+    { id: 'entropy.b', label: 'Diversity, by language (bits)' },
+    { id: 'entropy.n', label: 'Diversity, by mother tongue (bits)' },
+    { id: 'erasure', label: 'Diversity lost to grouping (mother tongue − language)' },
+    { id: 'other', label: 'Share counted only as "other"' },
+]
 
-var tooltip = d3.select("body").append("div")
-    .attr("class", "tooltip")
-    .style("opacity", 0)
+// The census sorts mother tongues into ~120 broad languages; those are what "language"
+// means here, and "mother tongue" is the finer level underneath (Bhojpuri under Hindi).
+const FAMILY_COLOR = {
+    'Indo-Aryan': '#3f6bb0',
+    'Dravidian': '#d98032',
+    'Sino-Tibetan': '#3f9a68',
+    'Austroasiatic': '#c0504d',
+    'Iranian': '#8067b7',
+    'Kra-Dai': '#b8a13a',
+    'Semitic': '#c86fa8',
+    'Germanic': '#8a7059',
+    'Other': '#9a9a9a',
+}
+const css = v => getComputedStyle(document.body).getPropertyValue(v).trim()
+const NO_DATA = css('--nodata') || '#e8e8e6'
+const LAND = css('--land') || '#dcdcd6'
+const RAMP = d3.interpolateYlGnBu
 
-var indicator = d3.select(".indicator")
+// ---------------------------------------------------------------- state
 
-var dropdown = indicator.append("div")
-    .style("margin", "10px")
-    .attr("class", "form-group")
-
-dropdown.append("label")
-    .attr("for", "lang")
-    .text("Language (Family)")
-
-dropdown = dropdown.append("select")
-    .attr("class", "form-control")
-    .attr("id", "lang")
-    
-var g = d3.select("#map")
-    .append("g")
-
-container.call(d3.zoom().on("zoom", function () {
-    g.attr("transform", d3.event.transform)
-}))
-
-var sc = d3.scaleLinear()
-    .interpolate(() => d3.interpolateRdPu)
-
-var colour = function(x, max=1) {
-    if (x == undefined) return '#eee'
-    return sc.domain([0, max])(x)
+const state = {
+    view: 'top1.b',
+    lang: null,   // a language id; overrides view when set
+    dots: false,
 }
 
-// draw legend
-function draw_legend(max=1, start, end) {
-    g.selectAll(".legend").remove()
-    for (var i = 0.0; i < 1.0; i += 0.05) {
-        var j = i * max
-        rect = g.append("rect")
-            .attr("class", "legend")
-            .attr("x", 0.6 * width + 0.1 * i * 1500)
-            .attr("y", 0.7 * height)
-            .attr("height", 0.03 * 750)
-            .attr("width", 0.005 * 1500)
-            .attr("fill", colour(j, max=max))
-            .attr("stroke", colour(j, max=max))
-    }
-    g.append("text")
-        .attr("class", "legend")
-        .text(start)
-        .attr("x", 0.6 * width)
-        .attr("y", 0.69 * height)
-        .attr("font-size", "smaller")
-    g.append("text")
-        .attr("class", "legend")
-        .text(end)
-        .attr("x", 0.6 * width + 150)
-        .attr("y", 0.69 * height)
-        .attr("font-size", "smaller")
-        .attr("text-anchor", "end")
+function readHash() {
+    const p = new URLSearchParams(location.hash.slice(1))
+    if (p.has('lang')) state.lang = p.get('lang')
+    if (p.has('view')) state.view = p.get('view')
+    state.dots = p.get('dots') === '1'
 }
 
-Promise.all([
-    d3.csv("population.csv"),
-    d3.json("nepal.geojson"),
-    d3.json("pakistan-2017.geojson"),
-    d3.json("india-5.json"),
-    d3.json("bangladesh.json"),
-    d3.json("sri-lanka-small.json"),
-    d3.csv("data/pakistan.csv"),
-    d3.csv("data/nepal.csv"),
-    d3.csv("data/sri_lanka.csv"),
-    d3.csv("data/andaman.csv"),
-    d3.csv("data/andhra_pradesh.csv"),
-    d3.csv("data/arunachal_pradesh.csv"),
-    d3.csv("data/assam.csv"),
-    d3.csv("data/bihar.csv"),
-    d3.csv("data/chandigarh.csv"),
-    d3.csv("data/chattisgarh.csv"),
-    d3.csv("data/dadra.csv"),
-    d3.csv("data/daman.csv"),
-    d3.csv("data/delhi.csv"),
-    d3.csv("data/goa.csv"),
-    d3.csv("data/gujarat.csv"),
-    d3.csv("data/haryana.csv"),
-    d3.csv("data/himachal.csv"),
-    d3.csv("data/jammu.csv"),
-    d3.csv("data/jharkhand.csv"),
-    d3.csv("data/karnataka.csv"),
-    d3.csv("data/kerala.csv"),
-    d3.csv("data/lakshadweep.csv"),
-    d3.csv("data/madhya_pradesh.csv"),
-    d3.csv("data/maharashtra.csv"),
-    d3.csv("data/manipur.csv"),
-    d3.csv("data/meghalaya.csv"),
-    d3.csv("data/mizoram.csv"),
-    d3.csv("data/nagaland.csv"),
-    d3.csv("data/odisha.csv"),
-    d3.csv("data/puducherry.csv"),
-    d3.csv("data/punjab.csv"),
-    d3.csv("data/rajasthan.csv"),
-    d3.csv("data/sikkim.csv"),
-    d3.csv("data/tamil_nadu.csv"),
-    d3.csv("data/tripura.csv"),
-    d3.csv("data/uttar_pradesh.csv"),
-    d3.csv("data/uttarakhand.csv"),
-    d3.csv("data/west_bengal.csv")
-]).then(function (files) {
-    load(files)
-})
+function writeHash() {
+    const p = new URLSearchParams()
+    if (state.lang) p.set('lang', state.lang)
+    else p.set('view', state.view)
+    if (state.dots) p.set('dots', '1')
+    history.replaceState(null, '', '#' + p)
+}
 
+// ---------------------------------------------------------------- chrome
 
-function load(files) {
-    var population = files[0]
-    var offset = 6
-    var map = {"type": "FeatureCollection", "features": []}
+const svg = d3.select('#map')
+const zoomLayer = svg.append('g')
+const land = zoomLayer.append('g').attr('id', 'land')
+const dotLayer = zoomLayer.append('g').attr('id', 'dots')
+const tooltip = d3.select('body').append('div').attr('class', 'tooltip')
+const status = d3.select('#status')
+const legend = d3.select('#legend')
 
-    // Pakistan
-    for (var i = 0; i < files[2].features.length; i++) {
-        p = files[2].features[i]
-        p.properties.censuscode = p.properties.shapeName.toUpperCase()
-        p.properties.DISTRICT = p.properties.shapeName
-        map.features.push(p)
-    }
+let width = window.innerWidth, height = window.innerHeight
+const projection = d3.geoMercator().rotate([-78.9629, -20.5937, 0])
+const path = d3.geoPath().projection(projection)
 
-    // Nepal
-    for (var i = 0; i < files[1].features.length; i++) {
-        p = files[1].features[i]
-        p.properties.censuscode = p.properties.DISTRICT + '_NEPAL'
-        map.features.push(p)
-    }
+function fit(features) {
+    width = window.innerWidth
+    height = window.innerHeight
+    svg.attr('width', width).attr('height', height)
+    projection.fitExtent([[10, 10], [width - 10, height - 10]], { type: 'FeatureCollection', features })
+}
 
-    // Bangladesh
-    for (var i = 0; i < files[4].features.length; i++) {
-        p = files[4].features[i]
-        p.properties.ST_NM = 'Bangladesh'
-        p.properties.DISTRICT = 'Bangladesh'
-        p.properties.censuscode = 'BANGLADESH'
-        map.features.push(p)
-    }
+svg.call(d3.zoom().scaleExtent([1, 60]).on('zoom', () => zoomLayer.attr('transform', d3.event.transform)))
 
-    // Sri Lanka
-    // for (var i = 0; i < files[5].features.length; i++) {
-    //     p = files[5].features[i]
-    //     p.properties.ST_NM = p.properties.ADM2_EN + ", " + p.properties.ADM1_EN
-    //     p.properties.DISTRICT = p.properties.ADM3_EN
-    //     p.properties.censuscode = p.properties.ADM3_EN
-    //     map.features.push(p)
-    // }
+// ---------------------------------------------------------------- load
 
-    // India
-    for (var i = 0; i < files[3].features.length; i++) {
-        p = files[3].features[i]
-        if (!p.geometry) continue
-        if (!p.properties.censuscode) {
-            p.properties.ST_NM = p.properties.stname
-            p.properties.DISTRICT = p.properties.sdtname + ", " + p.properties.dtname
-            p.properties.censuscode = p.properties.sdtcode11
-            if (p.properties.ST_NM == 'ASSAM') p.properties.censuscode = p.properties.dtcode11 + p.properties.sdtcode11
-        }
-        map.features.push(p)
-    }
+Promise.all([d3.json('dist/map.json'), d3.json('dist/data.json')])
+    .then(([map, data]) => start(map, data))
+    .catch(err => {
+        status.text('Could not load the map data. Run `node build.mjs` to generate dist/.')
+        console.error(err)
+    })
 
-    for (var i = 0; i < map.features.length; i++) {
-        for (var j = 0; j < map.features[i].geometry.coordinates.length; j++) {
-            if (isNaN(d3.polygonArea(map.features[i].geometry.coordinates[j]))) {
-                if (d3.polygonArea(map.features[i].geometry.coordinates[j][0]) < 0)
-                    map.features[i].geometry.coordinates[j][0] = map.features[i].geometry.coordinates[j][0].reverse()
-            }
-            else if (d3.polygonArea(map.features[i].geometry.coordinates[j]) < 0) {
-                map.features[i].geometry.coordinates[j] = map.features[i].geometry.coordinates[j].reverse()
-            }
-        }
-    }
+function start(map, { languages, units, asides }) {
+    // ------------------------------------------------------------ palette
 
-    population = population.reduce(function(map, obj) {
-        if (obj.Level == "DISTRICT" && obj.TRU == "Total") map[parseInt(obj.District)] = parseInt(obj.TOT_P)
-        return map
-    }, {})
-
-    conv = {
-        '34299999': '05930', '34199999': '05929', '33599999': '05928', '51899999': '05927',
-        '51999999': '05926', '60399999': '05925',
-        '31202078': '02077' // Jorhat
-    }
-
-    // India data
-    var data = {}, langs = {}
-    var num_to_broad_lang = {}, broad_lang_to_num = {}
-    for (var i = offset + 3; i < files.length; i++) {
-        var state = undefined, district = undefined
-        var data2 = files[i].reduce(function(map, obj) {
-            obj["Area name"] = obj["Area name"].trim()
-            var lang = obj["Mother tongue name"].trim()
-            if (lang.includes("Others")) {
-                s = lang.split(" ")
-                s[0] = parseInt(s[0])
-                lang = "Others counted under " + num_to_broad_lang[s[0]]
-            }
-            else if (lang[0] <= "9" && lang[0] >= "0") {
-                s = lang.split(" ")
-                s[0] = parseInt(s[0])
-                num_to_broad_lang[s[0]] = s[1]
-                broad_lang_to_num[s[1]] = s[0]
-            }
-            if (!(lang in langs)) langs[lang] = true
-            if (obj.District == "000") state = obj["Area name"]
-            if (obj["Sub-"] == "00000") district = obj["Area name"]
-            if (obj["Sub-"] != "00000") {
-                if (obj.District + obj["Sub-"] in conv) obj["Sub-"] = conv[obj.District + obj["Sub-"]]
-                if (state == "ASSAM") obj["Sub-"] = obj.District + obj["Sub-"]
-                obj.District = obj["Sub-"]
-                if (!(obj.District in map)) {
-                    map[obj.District] = new Proxy({}, {
-                        get: (target, name) => name in target ? target[name] : 0
-                    })
-                    map[obj.District]['total'] = 0
-                }
-                map[obj.District][lang] += parseInt(obj["Total"])
-                if (lang == '124 OTHERS') map[obj.District]["Other(s)"] += parseInt(obj["Total"])
-                if (lang[0] <= "9" && lang[0] >= "0" && !lang.includes("Others")) map[obj.District]["total"] += parseInt(obj["Total"])
-            }
-            return map
-        }, {})
-        data = {...data, ...data2}
-    }
-    console.log(data)
-
-    // Pakistan data
-    pakistan_to_india = {
-        'SINDHI': ['Sindhi', '19 SINDHI'],
-        'URDU': ['Urdu', '22 URDU'],
-        'BALOCHI': ['Balochi', '125 BALOCHI'],
-        'BRAHVI': ['Brahui', '126 BRAHUI'],
-        'KASHMIRI': ['Kashmiri', '8 KASHMIRI'],
-        'PUNJABI': ['Punjabi', '16 PUNJABI'],
-        'SARAIKI': ['Saraiki', '75 LAHNDA'],
-        'HINDKO': ['Hindko', '75 LAHNDA'],
-        'PUSHTO': ['Pashto', '24 AFGHANI/KABULI/PASHTO'],
-        'OTHER': ['Other(s)', '124 OTHERS'],
-        'total': ['total', 'total']
-    }
-    for (var i = 0; i < files[offset].length; i++) {
-        d = files[offset][i]
-        d.count = parseInt(d.count)
-        if (d.subdivision == 'KHANPUR TEHSIL') d.subdivision = 'KHAN PUR TEHSIL'
-        if (d.subdivision == 'DE-EXCLUDED AREA RAJANPUR') d.subdivision = 'DE-EXCLUDED AREA RAJANPUR TEHSIL'
-        if (d.subdivision == 'KINGRI TALUKA') d.subdivision = 'KINGRI (SINDH) TALUKA'
-        if (d.subdivision == 'DASHT SUB-TEHSIL') d.subdivision = 'DASHT (KECH) SUB-TEHSIL'
-        if (d.subdivision == 'MIRPUR SUB-TEHSIL') d.subdivision = 'MIRPUR (BALOCHISTAN) SUB-TEHSIL'
-        if (d.subdivision.includes('SUB DIVISION')) d.subdivision = d.subdivision.replace('SUB DIVISION', 'SUB-DIVISION')
-        if (d.subdivision == 'BHAG TEHSIL') d.subdivision = 'BHAG (BALOCHISTAN) TEHSIL'
-        if (d.subdivision == 'SAHIWAL TEHSIL' && d.district == 'SARGODHA DISTRICT') d.subdivision = 'SAHIWAL (SARGODHA) TEHSIL'
-        if (d.subdivision == 'NOWSHERA TEHSIL' && d.province == 'PUNJAB') d.subdivision = 'NOWSHERA (PUNJAB) TEHSIL'
-        if (d.subdivision == 'TAMBOO TEHSIL' && d.district == 'KOHLU DISTRICT') d.subdivision = 'TAMBOO (KOHLU) TEHSIL'
-        s = d.subdivision.split(' ')
-        if (s[0] == 'FR') s.push('TEHSIL')
-        if (s[s.length - 1] == 'DISTRICT') continue
-        else d.subdivision = s.slice(0, s.length - 1).join(' ')
-
-        if (!(d.subdivision in data)) {
-            data[d.subdivision] = new Proxy({}, {
-                get: (target, name) => name in target ? target[name] : 0
+    // Hue carries the family, lightness separates languages within it, biggest first.
+    // Colour is the only thing distinguishing ~40 languages on the "largest" views, so
+    // a hash of the name (which is what this used to be) throws away the one signal a
+    // reader can actually use.
+    // Walking lightness up and down from the base runs out of room fast: past the sixth
+    // language in a family everything clamps to white or near-black, which is how Punjabi
+    // ended up the same colour as a dozen languages it sits next to. Vary lightness, hue
+    // and chroma together instead, on a cycle that never reaches either extreme.
+    const VARIANTS = [
+        { l: 0, h: 0, c: 1.00 },
+        { l: +18, h: +10, c: 0.80 },
+        { l: -15, h: -11, c: 0.95 },
+        { l: +9, h: -19, c: 0.55 },
+        { l: -7, h: +19, c: 0.62 },
+        { l: +24, h: -5, c: 0.42 },
+        { l: -19, h: +6, c: 0.72 },
+        { l: +13, h: +23, c: 1.00 },
+    ]
+    const shade = {}
+    for (const kind of ['broad', 'narrow']) {
+        const byFamily = {}
+        Object.entries(languages)
+            .filter(([, l]) => l.kind === kind)
+            .sort((a, b) => (b[1].total || 0) - (a[1].total || 0))
+            .forEach(([id, l]) => (byFamily[l.family] ??= []).push(id))
+        for (const [family, ids] of Object.entries(byFamily)) {
+            const base = d3.hcl(FAMILY_COLOR[family] || FAMILY_COLOR.Other)
+            ids.forEach((id, i) => {
+                const v = VARIANTS[i % VARIANTS.length]
+                const lap = Math.floor(i / VARIANTS.length) // second time round, nudge again
+                shade[id] = d3.hcl(
+                    base.h + v.h + lap * 7,
+                    base.c * v.c * (lap ? 0.75 : 1),
+                    clamp(base.l + v.l + lap * 5, 30, 80),
+                ) + ''
             })
         }
-        if (d.urban == 'TOTAL' && d.sex == 'ALL SEXES' && d.language == 'TOTAL') {
-            d.language = 'total'
-            population[d.subdivision] = d.count
-        }
-        if (d.urban == 'TOTAL' && d.sex == 'ALL SEXES') {
-            if (d.subdivision == 'NOWSHERA') console.log(d)
-            data[d.subdivision][pakistan_to_india[d.language][0]] += d.count
-            langs[pakistan_to_india[d.language][0]] = true
-            if (d.language != 'total') {
-                data[d.subdivision][pakistan_to_india[d.language][1]] += d.count
-                langs[pakistan_to_india[d.language][1]] = true
-            }
-        }
+    }
+    const colorOf = id => (id && shade[id]) || NO_DATA
+
+    // ------------------------------------------------------------ controls
+
+    const viewSelect = d3.select('#view')
+    // Shown only while a single language is selected, so the dropdown never claims to be
+    // displaying a view that the language search has overridden.
+    viewSelect.append('option')
+        .attr('value', SINGLE).attr('disabled', '').attr('hidden', '')
+        .text('Single language (below)')
+    viewSelect.selectAll('option.view').data(VIEWS).enter().append('option')
+        .attr('class', 'view').attr('value', d => d.id).text(d => d.label)
+
+    // A searchable list beats a 600-entry <select> you have to scroll.
+    const langOptions = Object.entries(languages)
+        .filter(([, l]) => l.total > 0)
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([id, l]) => ({
+            id,
+            label: `${l.name} — ${l.family}${l.kind === 'broad' ? '' : ', mother tongue'}`,
+        }))
+    const idByLabel = new Map(langOptions.map(o => [o.label, o.id]))
+    d3.select('#langlist').selectAll('option').data(langOptions).enter()
+        .append('option').attr('value', d => d.label)
+
+    viewSelect.on('change', function () {
+        state.view = this.value
+        state.lang = null
+        d3.select('#lang').property('value', '')
+        render()
+    })
+    d3.select('#lang').on('change', function () {
+        state.lang = idByLabel.get(this.value) || null
+        viewSelect.property('value', state.lang ? SINGLE : state.view)
+        render()
+    })
+    d3.select('#dots').on('change', function () {
+        state.dots = this.checked
+        render()
+    })
+
+    // ------------------------------------------------------------ map
+
+    fit(map.features)
+
+    const paths = land.selectAll('path').data(map.features).enter().append('path')
+        .attr('d', path)
+        .attr('stroke', 'none')
+
+    // One unit can own several polygons (a district drawn from its sub-district shapes,
+    // an island group). Highlight them together — the old id-based lookup silently
+    // missed any name with two spaces in it.
+    const nodesOf = new Map()
+    paths.each(function (d) {
+        const id = d.properties.id
+        if (!nodesOf.has(id)) nodesOf.set(id, [])
+        nodesOf.get(id).push(this)
+    })
+
+    function place() {
+        const [x, y] = [d3.event.pageX, d3.event.pageY]
+        const box = tooltip.node().getBoundingClientRect()
+        tooltip
+            .style('left', Math.max(8, Math.min(x + 16, window.innerWidth - box.width - 8)) + 'px')
+            .style('top', Math.max(8, Math.min(y - 20, window.innerHeight - box.height - 8)) + 'px')
     }
 
-    // Nepal data
-    nepal_to_india = {
-        'Avadhi': 'Awadhi', 'Oriya': 'Odia', 'Other': 'Other(s)', 'Rajbanshi': 'Rajbangsi', 'Kurux': 'Kurukh/Oraon',
-        'Hariyanvi': 'Haryanvi', 'Santhali': 'Santali', 'Magahi': 'Magadhi/Magahi'
-    }
-    nepal_to_broad = {
-        'Awadhi': '6 HINDI', 'Bhojpuri': '6 HINDI', 'Bajjika': '6 HINDI', 'Hariyanvi': '6 HINDI', 'Magahi': '6 HINDI',
-        'Other(s)': '124 OTHERS'
-    }
-    ct = 127
-    for (var i = 0; i < files[offset + 1].length; i++) {
-        var d = files[offset + 1][i]
-        var name = d.admin2_name.toUpperCase() + "_NEPAL"
-        d.pop_total = parseInt(d.pop_total)
-        data[name] = new Proxy({}, {
-            get: (target, name) => name in target ? target[name] : 0
+    paths
+        .on('mouseover', d => {
+            const nodes = nodesOf.get(d.properties.id) || []
+            d3.selectAll(nodes).classed('hover', true).raise()
+            const html = describe(d.properties.id)
+            if (!html) return
+            tooltip.html(html).style('opacity', 1)
+            place()
         })
-        data[name]['total'] = d.pop_total
-        for (prop in d) {
-            if (prop.endsWith('_primary')) {
-                var p = parseInt(parseFloat(d[prop]) * d.pop_total)
-                var l = prop.replace('_primary', '')
-                if (l in nepal_to_india) l = nepal_to_india[l]
-                langs[l] = true
-                data[name][l] = p
-                if (l in nepal_to_broad) data[name][nepal_to_broad[l]] += p
-                else {
-                    l = l.toUpperCase()
-                    if (l in broad_lang_to_num) data[name][broad_lang_to_num[l] + ' ' + l] += p
-                    else {
-                        console.log(l)
-                        data[name][ct + ' ' + l] += p
-                        langs[ct + ' ' + l] = true
-                        broad_lang_to_num[l] = ct
-                        num_to_broad_lang[ct] = l
-                        ct += 1
+        .on('mousemove', place)
+        .on('mouseout', d => {
+            d3.selectAll(nodesOf.get(d.properties.id) || []).classed('hover', false)
+            tooltip.style('opacity', 0)
+        })
+
+    window.addEventListener('resize', () => {
+        fit(map.features)
+        paths.attr('d', path)
+        render() // dot positions are in projected space, so they have to be resampled
+    })
+
+    // ------------------------------------------------------------ tooltip
+
+    const fmt = n => (n || 0).toLocaleString('en-US')
+    const pct = x => (100 * x).toFixed(x < 0.1 ? 2 : 1) + '%'
+
+    // A ring of the composition, in the same colours as the map. Whatever is not in the
+    // top few is one grey slice, so the ring always closes and always sums to everyone.
+    function ring(rank, L, total, r = 26) {
+        if (!total) return ''
+        const shown = rank.reduce((s, id) => s + (L[id] || 0), 0)
+        const slices = rank.map(id => [colorOf(id), L[id] || 0])
+        if (shown < total) slices.push([NO_DATA, total - shown])
+
+        const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r)
+        const pie = d3.pie().sort(null).value(d => d[1])
+        return `<svg width="${2 * r}" height="${2 * r}" viewBox="${-r} ${-r} ${2 * r} ${2 * r}">`
+            + pie(slices).map(s =>
+                `<path d="${arc(s)}" fill="${s.data[0]}"></path>`).join('')
+            + '</svg>'
+    }
+
+    function table(rank, L, total) {
+        return `<table>${rank.map(id => `<tr>
+            <td><span class="chip" style="background:${colorOf(id)}"></span>${languages[id].name}</td>
+            <td>${fmt(L[id])}</td>
+            <td>${pct(L[id] / total)}</td></tr>`).join('')}</table>`
+    }
+
+    function describe(id) {
+        const u = units[id]
+        if (!u) return null
+        const kind = currentKind()
+        const rank = (kind === 'broad' ? u.rb : u.rn).slice(0, 5)
+        const where = [u.d, u.s].filter(Boolean).join(', ')
+        const bits = (kind === 'broad' ? u.eb : u.en).toFixed(2)
+
+        // The census reports some of this district's people — a municipal corporation —
+        // outside any sub-district, so they are on no polygon anywhere. Show them next to
+        // the tehsil rather than letting them vanish.
+        const a = u.a && asides[u.a]
+        const aRank = a ? (kind === 'broad' ? a.rb : a.rn).slice(0, 3) : []
+
+        return `<h2>${u.n}</h2>
+            ${where ? `<div class="where">${where}</div>` : ''}
+            <div class="where">${fmt(u.t)} people · ${bits} bits of diversity</div>
+            <div class="split">${ring(rank, u.L, u.t)}<div class="grow">${table(rank, u.L, u.t)}</div></div>
+            ${u.x ? '<div class="note">Shown at district level: the census gives no usable sub-district breakdown here.</div>' : ''}
+            ${a ? `<div class="aside">
+                <div class="where">Plus ${fmt(a.t)} people in ${u.d || 'this'} district that the census
+                    places in no sub-district (its towns), and so are on no polygon:</div>
+                <div class="split">${ring(aRank, a.L, a.t, 20)}<div class="grow">${table(aRank, a.L, a.t)}</div></div>
+            </div>` : ''}`
+    }
+
+    // ------------------------------------------------------------ views
+
+    const currentKind = () =>
+        state.lang ? languages[state.lang].kind
+            : state.view.endsWith('.n') ? 'narrow' : 'broad'
+
+    // Each view returns {fill, legend}. fill(unit) -> colour or null for "no data".
+    function layer() {
+        if (state.lang) {
+            const l = languages[state.lang]
+            const max = d3.max(Object.values(units), u => (u.L[state.lang] || 0) / (u.t || 1)) || 1
+            return {
+                categorical: false,
+                fill: u => (u.t ? RAMP(0.08 + 0.92 * ((u.L[state.lang] || 0) / u.t) / max) : null),
+                legend: { title: `${l.name} as a share of the population`, lo: '0%', hi: pct(max) },
+                langs: u => (u.L[state.lang] ? [state.lang] : []),
+            }
+        }
+
+        const [kind, which] = [currentKind(), state.view.split('.')[0]]
+        const rankOf = u => (kind === 'broad' ? u.rb : u.rn)
+        const nth = { top1: 0, top2: 1, top3: 2 }[which]
+
+        if (nth !== undefined) return {
+            categorical: true,
+            fill: u => colorOf(rankOf(u)[nth]),
+            pick: u => rankOf(u)[nth],
+            langs: u => Object.keys(u.L).filter(id => languages[id].kind === kind),
+        }
+
+        const ramp = (value, max, lo, hi, title) => ({
+            categorical: false,
+            fill: u => (u.t ? RAMP(0.08 + 0.92 * Math.min(1, value(u) / max)) : null),
+            legend: { title, lo, hi },
+            langs: u => Object.keys(u.L).filter(id => languages[id].kind === kind),
+        })
+
+        if (which === 'count') {
+            const max = d3.max(Object.values(units), u => (kind === 'broad' ? u.kb : u.kn))
+            return ramp(u => (kind === 'broad' ? u.kb : u.kn), max, '0', String(max),
+                kind === 'broad' ? 'Languages spoken' : 'Mother tongues spoken')
+        }
+        if (which === 'entropy')
+            return ramp(u => (kind === 'broad' ? u.eb : u.en), 4, '0 bits', '4 bits',
+                'Shannon diversity of the language distribution')
+        if (which === 'erasure')
+            return ramp(u => u.en - u.eb, 2.5, '0 bits', '2.5 bits',
+                'Diversity that disappears when mother tongues are grouped into languages')
+        return ramp(u => u.o, 1, '0%', '100%',
+            'Population whose mother tongue the census records only as "other"')
+    }
+
+    // ------------------------------------------------------------ legend
+
+    function drawLegend(spec) {
+        legend.html('')
+        if (spec.categorical) {
+            // name the languages actually on screen, commonest first
+            const seen = new Map()
+            for (const f of map.features) {
+                const u = units[f.properties.id]
+                if (!u) continue
+                const id = spec.pick(u)
+                if (id) seen.set(id, (seen.get(id) || 0) + 1)
+            }
+            const top = [...seen].sort((a, b) => b[1] - a[1]).slice(0, 18)
+            legend.append('div').attr('class', 'fam')
+                .text(`${seen.size} languages shown; hue is the family`)
+            for (const [id] of top) {
+                const row = legend.append('div').attr('class', 'row')
+                row.append('div').attr('class', 'swatch').style('background', colorOf(id))
+                row.append('div').attr('class', 'name').text(languages[id].name)
+                row.append('div').attr('class', 'fam').text(languages[id].family)
+            }
+            if (seen.size > top.length)
+                legend.append('div').attr('class', 'fam').style('padding-top', '4px')
+                    .text(`… and ${seen.size - top.length} more`)
+            return
+        }
+        const { title, lo, hi } = spec.legend
+        legend.append('div').attr('class', 'fam').text(title)
+        const stops = d3.range(0, 1.001, 0.05).map(t => RAMP(0.08 + 0.92 * t)).join(',')
+        legend.append('div').attr('class', 'ramp')
+            .style('background', `linear-gradient(to right, ${stops})`)
+        const ends = legend.append('div').attr('class', 'ends')
+        ends.append('span').text(lo)
+        ends.append('span').text(hi)
+    }
+
+    // ------------------------------------------------------------ dots
+
+    // Where can a dot go? Rasterise every polygon once into an offscreen canvas, each
+    // filled with its own index as a colour, and keep the pixels each unit owns. Sampling
+    // a pixel uniformly is then automatically area-weighted, and costs nothing.
+    //
+    // The alternative — throwing random points at a polygon until one lands inside — pays
+    // a point-in-polygon test per attempt against geometry with thousands of vertices.
+    // That took 37 seconds for the whole map. This takes about half of one.
+    let pixelsOf = null // unit id -> Int32Array of packed y*width+x
+    let pixelsFor = 0   // the projection these were computed against
+
+    function samplePixels() {
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        const draw = d3.geoPath().projection(projection).context(ctx)
+
+        map.features.forEach((f, i) => {
+            ctx.beginPath()
+            draw(f)
+            // index+1 as a 24-bit colour, so pixel colour identifies the polygon
+            ctx.fillStyle = '#' + (i + 1).toString(16).padStart(6, '0')
+            ctx.fill()
+        })
+
+        const px = ctx.getImageData(0, 0, width, height).data
+        const at = p => (px[p * 4] << 16) | (px[p * 4 + 1] << 8) | px[p * 4 + 2]
+
+        const buckets = new Map()
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const p = y * width + x
+                const v = at(p)
+                if (!v || v > map.features.length) continue
+                // Anti-aliased edge pixels blend two polygons' colours into a third
+                // polygon's index. Keep only pixels whose neighbours agree.
+                if (at(p - 1) !== v || at(p + 1) !== v || at(p - width) !== v || at(p + width) !== v) continue
+                const id = map.features[v - 1].properties.id
+                if (!buckets.has(id)) buckets.set(id, [])
+                buckets.get(id).push(p)
+            }
+        }
+        for (const [id, list] of buckets) buckets.set(id, Int32Array.from(list))
+        pixelsOf = buckets
+        pixelsFor = projection.scale()
+    }
+
+    // A unit too small to own a whole pixel still gets its dots, at its centroid.
+    const centroidOf = new Map()
+    for (const f of map.features)
+        if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
+
+    let generation = 0
+
+    async function drawDots(spec) {
+        const mine = ++generation
+        dotLayer.selectAll('*').remove()
+        if (!state.dots) { status.text(''); return }
+
+        if (pixelsFor !== projection.scale()) {
+            status.text('Finding where dots can go…')
+            await new Promise(r => setTimeout(r, 0))
+            if (mine !== generation) return
+            samplePixels()
+            centroidOf.clear()
+            for (const f of map.features)
+                if (!centroidOf.has(f.properties.id)) centroidOf.set(f.properties.id, path.centroid(f))
+        }
+
+        const byLang = new Map() // language id -> one path 'd' string of many dots
+        const ids = Object.keys(units)
+        let total = 0
+
+        for (let i = 0; i < ids.length; i++) {
+            // Yield rarely: a backgrounded tab clamps setTimeout to once a second, so each
+            // of these costs a second when nobody is watching.
+            if (i % 2000 === 0) {
+                status.text(`Placing dots… ${Math.round(100 * i / ids.length)}%`)
+                await new Promise(r => setTimeout(r, 0))
+                if (mine !== generation) return // superseded by a newer selection
+            }
+            const u = units[ids[i]]
+            const pool = pixelsOf.get(ids[i])
+            const centre = centroidOf.get(ids[i])
+            if (!pool && !centre) continue
+
+            for (const id of spec.langs(u)) {
+                let n = Math.round(u.L[id] / DOT_POP)
+                if (!n) continue
+                total += n
+                let d = byLang.get(id) || ''
+                while (n--) {
+                    let x, y
+                    if (pool && pool.length) {
+                        const p = pool[(Math.random() * pool.length) | 0]
+                        x = (p % width) + Math.random()
+                        y = ((p / width) | 0) + Math.random()
+                    } else {
+                        [x, y] = centre
                     }
+                    d += `M${x.toFixed(1)} ${y.toFixed(1)}l0 .01`
                 }
+                byLang.set(id, d)
             }
         }
+        if (mine !== generation) return
+
+        dotLayer.selectAll('path').data([...byLang]).enter().append('path')
+            .attr('d', d => d[1])
+            .attr('stroke', d => (spec.categorical ? colorOf(d[0]) : RAMP(0.85)))
+        status.text(`${total.toLocaleString('en-US')} dots · 1 = ${DOT_POP.toLocaleString('en-US')} speakers`)
     }
 
-    // Sri Lanka data
-    // for (var i = 0; i < files[offset + 2].length; i++) {
-    //     var d = files[offset + 2][i]
-    //     var name = d.Subdivision
-    //     data[name] = {'total': 0, '20 TAMIL': 0, '190 SINHALA': 0, '40 ENGLISH': 0, '124 OTHERS': 0, '191 MALAY': 0}
-    //     for (prop in d) {
-    //         if (prop == 'total' || prop == 'Not reported' || !d[prop]) continue
-    //         d[prop] = parseInt(d[prop])
-    //         if (d[prop] == NaN) continue
-    //         if (prop == 'Subdivision') continue
-    //         data[name][prop] = d[prop]
-    //         data[name].total += d[prop]
-    //         if (prop.includes('Tamil')) data[name]['20 TAMIL'] += d[prop]
-    //         else if (prop.includes('Sinhala')) data[name]['190 SINHALA'] += d[prop]
-    //         else if (prop.includes('European')) data[name]['40 ENGLISH'] += d[prop]
-    //         else if (prop.includes('Malay')) data[name]['191 MALAY'] += d[prop]
-    //         else data[name]['124 OTHERS'] += d[prop]
-    //     }
-    //     console.log(data[name])
-    // }
+    // ------------------------------------------------------------ render
 
-    // Bangladesh data
-    data['BANGLADESH'] = {}
-    data['BANGLADESH']['Bengali'] = 163507029
-    data['BANGLADESH']['2 BENGALI'] = 163507029
-    data['BANGLADESH']['Other(s)'] = 1651587
-    data['BANGLADESH']['124 OTHER'] = 1651587
-    data['BANGLADESH']['total'] = 165158616
-
-
-    var entropy = new Proxy({}, {
-        get: (target, name) => name in target ? target[name] : 0
-      })
-    var entropy_broad = new Proxy({}, {
-        get: (target, name) => name in target ? target[name] : 0
-      })
-    var sorted = new Proxy({}, {
-        get: (target, name) => name in target ? target[name] : ["0"]
-      })
-
-    for (code in data) {
-        sorted[code] = Object.keys(data[code]).sort(
-            function(a, b) {
-                return data[code][b] - data[code][a]
-            }
-        )
-        sorted[code].shift()
-        entropy[code] = 0.0
-        entropy_broad[code] = 0.0
-        
-        sorted[code].forEach(lang => {
-            var p = data[code][lang] / data[code]['total']
-            if (p != 0) {
-                if (lang[0] <= "9" && lang[0] >= "0" && !(lang.includes("Others"))) entropy_broad[code] -= p * Math.log2(p)
-                else entropy[code] -= p * Math.log2(p)
-            }
+    function render() {
+        writeHash()
+        const spec = layer()
+        paths.attr('fill', d => {
+            const u = units[d.properties.id]
+            return (u && spec.fill(u)) || NO_DATA
         })
-        if (entropy_broad[code] == 0.0) entropy_broad[code] = entropy[code]
-    }
-    
-    dropdown.append("option")
-        .text("All (narrow)")
-    dropdown.append("option")
-        .text("All (broad)")
-    dropdown.append("option")
-        .text("All (narrow, second-largest)")
-    dropdown.append("option")
-        .text("All (broad, second-largest)")
-    dropdown.append("option")
-        .text("All (narrow, third-largest)")
-    dropdown.append("option")
-        .text("All (broad, third-largest)")
-    dropdown.append("option")
-        .text("Number of languages spoken (narrow)")
-    dropdown.append("option")
-        .text("Number of languages spoken (broad)")
-    dropdown.append("option")
-        .text("Diversity (broad)")
-    dropdown.append("option")
-        .text("Diversity (narrow)")
-    dropdown.append("option")
-        .text("Diversity erasure (narrow - broad)")
-    dropdown.append("option")
-        .text("Total classified as other")
-
-    var sorted_langs = Object.keys(langs)
-    sorted_langs.sort((a, b) => {
-        if (a[0] >= "0" && a[0] <= "9" && b[0] >= "0" && b[0] <= "9") {
-            return parseInt(a.split(" ")[0]) - parseInt(b.split(" ")[0])
+        drawLegend(spec)
+        if (state.dots) {
+            // The dots carry the colour, so the choropleth underneath them becomes a
+            // plain basemap — otherwise the two encodings fight each other.
+            paths.attr('fill', d => (units[d.properties.id] ? LAND : NO_DATA))
+            drawDots(spec)
+        } else {
+            dotLayer.selectAll('*').remove()
+            generation++
+            status.text('')
         }
-        else if (a[0] >= "0" && a[0] <= "9") return -1
-        else if (b[0] >= "0" && b[0] <= "9") return 1
-        else if (a > b) return 1
-        else if (b > a) return -1
-        else return 0
-    })
-
-    for (key in sorted_langs) {
-        if (key != "") dropdown.append("option")
-            .text(sorted_langs[key])
     }
 
-    var lang = ""
+    // ------------------------------------------------------------ go
 
-    dropdown.on("change", function(d) {
-        update(this.value)
-    })
-
-    var stringToColour = function(str) {
-        try {
-            var hash = 0
-            for (var i = 0; i < str.length; i++) {
-                hash = str.charCodeAt(i) + ((hash << 4) - hash)
-            }
-            var c = '#'
-            for (var i = 0; i < 3; i++) {
-                var value = (hash >> (i * 8)) & 0xFF
-                c += ('00' + value.toString(16)).substr(-2)
-            }
-            return c
-        }
-        catch {
-            return colour(0)
-        }
+    readHash()
+    if (state.lang && !languages[state.lang]) state.lang = null
+    if (!VIEWS.some(v => v.id === state.view)) state.view = 'top1.b'
+    d3.select('#dots').property('checked', state.dots)
+    if (state.lang) {
+        const opt = langOptions.find(o => o.id === state.lang)
+        if (opt) d3.select('#lang').property('value', opt.label)
     }
-    
-    g.selectAll("path")
-        .data(map.features)
-        .enter()
-        .append("path")
-        .attr("d", d => {
-            return path(d)
-        })
-        .attr("id", d => {
-            console.log(d)
-            return "d_" + d.properties.censuscode.toString().replace(" ", "_")
-        })
-        .attr("opacity", 1)
-        .on("mousemove", function (d) {
-            tooltip
-                .style("left", (d3.event.pageX + 15) + "px")
-                .style("top", (d3.event.pageY - 28) + "px")
-            d3.selectAll("#d_" + d.properties.censuscode.toString().replace(" ", "_")).attr("stroke", "black").attr("stroke-width", "0.5px").raise()
-        })
-        .on("mouseout", function (d) {
-            tooltip.transition()
-                .duration(250)
-                .style("opacity", 0)
-            d3.selectAll("#d_" + d.properties.censuscode.toString().replace(" ", "_")).attr("stroke", null).attr("stroke-width", null).lower()
-        })
-
-    function reformat(fill, text) {
-        g.selectAll("path")
-            .attr("fill", d => {
-                var code = d.properties.censuscode
-                if (!code || fill(code) == undefined) return colour(undefined)
-                return fill(code)
-            })
-            // .attr("stroke", d => {
-            //     var code = d.properties.censuscode
-            //     if (!code || fill(code) == undefined) return colour(undefined)
-            //     return fill(code)
-            // })
-            // .attr("stroke-width", "0.5px")
-            .on("mouseover", function(d) {
-                var code = d.properties.censuscode
-                if (!code || fill(code) == undefined) return
-                tooltip.transition()
-                    .duration(250)
-                    .style("opacity", 1)
-                tooltip.html(
-                    "<p><strong>" + d.properties.DISTRICT + (d.properties.name_2 ? ", " + d.properties.name_2 : "") + (d.properties.ST_NM ? ", " + d.properties.ST_NM : "") + "</strong><br>" +
-                        (code in data ? data[code]['total'].toLocaleString('en-US') : 0) + " people total<br>" +
-                        (text(code) ? text(code) : 0) + "<br>" +
-                        "</p>")
-                    .style("left", (d3.event.pageX + 15) + "px")
-                    .style("top", (d3.event.pageY - 28) + "px")
-            })
-    }
-
-    update("")
-
-    function table_broad(c) {
-        var langs = sorted[c].filter(d => {
-            return (d[0] <= "9" && d[0] >= "0" && !d.includes("Others"))
-        })
-        if (langs === undefined || langs.length == 0) {
-            langs = sorted[c]
-        }
-        var ret = (entropy_broad[c].toFixed(2)) + " bits (diversity)<br>" +
-            "<table class=\"table table-striped table-sm\">"
-        if (!(c in sorted)) return ret
-        langs.forEach((d, i) => {
-            if (i >= 5) return
-            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (data[c]['total'] ? data[c]['total'] : 1)).toFixed(2) + "%</td></tr>"
-        })
-        ret += "</table>"
-        return ret
-    }
-
-    function table_narrow(c) {
-        var langs = sorted[c].filter(d => {
-            return (!(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-        })
-        if (langs === undefined || langs.length == 0) {
-            langs = sorted[c]
-        }
-        var ret = (entropy[c].toFixed(2)) + " bits (diversity)<br>" +
-            "<table class=\"table table-striped table-sm\">"
-        if (!(c in sorted)) return ret
-        langs.forEach((d, i) => {
-            if (i >= 5) return
-            ret += "<tr><td>" + d + "</td><td>" + data[c][d].toLocaleString('en-US') + "</td><td>" + (100 * data[c][d] / (data[c]['total'] ? data[c]['total'] : 1)).toFixed(2) + "%</td></tr>"
-        })
-        ret += "</table>"
-        return ret
-    }
-    
-    function update(lang) {
-        if (lang == "All (broad)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
-                return stringToColour(langs[0])
-            }, table_broad)
-        }
-        else if (lang == "" || lang == "All (narrow)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-                return stringToColour(langs[0])
-            }, table_narrow)
-        }
-        else if (lang == "All (narrow, second-largest)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-                return stringToColour(langs[1])
-            }, table_narrow)
-        }
-        else if (lang == "All (broad, second-largest)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
-                return stringToColour(langs[1])
-            }, table_broad)
-        }
-        else if (lang == "All (narrow, third-largest)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-                return stringToColour(langs[2])
-            }, table_narrow)
-        }
-        else if (lang == "All (broad, third-largest)") {
-            d3.selectAll(".legend").remove()
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0") && d != "total")
-                return stringToColour(langs[2])
-            }, table_broad)
-        }
-        else if (lang == "Number of languages spoken (narrow)") {
-            draw_legend(200, 'None', '200')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => !(d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-                var ct = 0
-                for (lang in langs) {
-                    if (data[c][langs[lang]] != 0) ct += 1 
-                }
-                return colour(ct, 200)
-            }, table_narrow)
-        }
-        else if (lang == "Number of languages spoken (broad)") {
-            draw_legend(200, 'None', '200')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => (d[0] <= "9" && d[0] >= "0" && !d.includes("Others")) && d != "total")
-                var ct = 0
-                for (lang in langs) {
-                    if (data[c][langs[lang]] != 0) ct += 1 
-                }
-                return colour(ct, 200)
-            }, table_narrow)
-        }
-        else if (lang == "Diversity (broad)") {
-            draw_legend(4, '0 bits', '4')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                return colour(entropy_broad[c], 4)
-            }, table_broad)
-        }
-        else if (lang == "Diversity (narrow)") {
-            draw_legend(4, '0 bits', '4')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                return colour(entropy[c], 4)
-            }, table_narrow)
-        }
-        else if (lang == "Diversity erasure (narrow - broad)") {
-            draw_legend(2.5, '0 bits', '2.5')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                return colour(entropy[c] - entropy_broad[c], 2.5)
-            }, table_narrow)
-        }
-        else if (lang == "Total classified as other") {
-            draw_legend(1, '0%', '100%')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                var langs = sorted[c].filter(d => (d.includes("Others") || d.includes("Other(s)")) && d != "total")
-                var sum = 0.0
-                for (lang in langs) {
-                    sum += data[c][langs[lang]]
-                }
-                return colour(sum / data[c]['total'], 1.0)
-            }, table_narrow)
-        }
-        else {
-            maximum = 0.0
-            for (c in data) {
-                if (data[c]['total'] == 0) continue
-                var p = data[c][lang] / data[c]['total']
-                if (p > maximum) maximum = p
-            }
-            draw_legend(maximum, '0%', (maximum * 100).toFixed(2) + '%')
-            reformat(function(c) {
-                if (!(c in data)) return colour(undefined)
-                if (data[c]['total'] == 0) return colour(undefined)
-                if (!(lang in data[c])) return colour(0 )
-                return colour(data[c][lang] / data[c]['total'], maximum)
-            }, function(c) {
-                if (!(c in data)) return '?'
-                return (lang in data[c] ? data[c][lang] : 0).toLocaleString('en-US') + " speakers (" +
-                ((lang in data[c] ? data[c][lang] : 0) / data[c]['total']).toLocaleString(undefined, {style: 'percent', minimumFractionDigits:2}) + ")"
-            })
-        }
-    }
+    viewSelect.property('value', state.lang ? SINGLE : state.view)
+    render()
 }
+
+function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)) }

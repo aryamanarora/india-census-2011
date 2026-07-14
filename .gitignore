@@ -1,1 +1,11 @@
+.DS_Store
 *.pdf
+
+# Raw downloads and scratch geometry kept locally, not shipped:
+# the build reads only india-5.json, pakistan-2017.geojson, nepal.geojson and bangladesh.json.
+misc/
+india.json
+india-2011.geojson
+gadm36_IND_1.json
+hindi.svg
+population.csv

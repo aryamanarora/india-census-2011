@@ -1,0 +1,8 @@
+census_key,sdtcode11,note
+34299999,05930,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+34199999,05929,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+33599999,05928,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+51899999,05927,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+51999999,05926,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+60399999,05925,census reports a 99999 pseudo-subdistrict; maps to a real polygon
+31202078,02077,Jorhat: census subdistrict code is off by one against the shapefile
