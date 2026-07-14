@@ -3,7 +3,7 @@
 //   dist/data.json  language counts and derived stats per unit
 // Everything about joining census rows to polygons lives in build.mjs; this file draws.
 
-const DOT_POP = 100000 // one dot per this many speakers
+const DOT_POP = 10000 // one dot per this many speakers
 const SINGLE = '__single__' // the "Show" value used while a single language is picked
 
 const VIEWS = [
