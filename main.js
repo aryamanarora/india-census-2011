@@ -327,12 +327,28 @@ function start(map, { languages, units, asides }) {
         const bits = (kind === 'broad' ? u.eb : u.en).toFixed(2)
         const noun = kind === 'broad' ? 'languages' : 'mother tongues'
 
-        // Some of this district's people are on no polygon — a municipal corporation the
-        // census keeps outside any sub-district, a sub-district the shapefile is missing, a
-        // tehsil created after it was drawn. Show them next to whichever unit is hovered
-        // rather than letting them vanish.
+        // Some people belong here but are on no polygon of their own. A placed orphan is a
+        // sub-district the shapefile is missing, shown against the nearest mapped tehsil (this
+        // one). The district aside is everyone else with no polygon — municipal areas outside
+        // any sub-district, tehsils drawn too new — shared across all the district's tehsils.
+        const block = (caption, side) => {
+            const r = rankAll(side.L, kind)
+            return `<div class="aside">
+                <div class="where">${caption}</div>
+                <div class="split">
+                    ${ring(r, side.L, side.t, 20)}
+                    <div class="grow scroll short">${table(r, side.L, side.t)}</div>
+                </div>
+            </div>`
+        }
+        const extras = (u.e || []).map(aid => {
+            const o = asides[aid]
+            return block(`Plus ${o.n} (${fmt(o.t)} people), which the shapefile is missing —`
+                + ' shown here as its nearest mapped tehsil:', o)
+        }).join('')
         const a = u.a && asides[u.a]
-        const aRank = a ? rankAll(a.L, kind) : []
+        const districtAside = a ? block(`Plus ${fmt(a.t)} people elsewhere in ${u.d || 'this'} district`
+            + ' with no polygon of their own (towns, or areas the shapefile is missing):', a) : ''
 
         return `${isPinned ? '<button class="close" title="Close (Esc)">&times;</button>' : ''}
             <h2>${u.n}</h2>
@@ -343,14 +359,7 @@ function start(map, { languages, units, asides }) {
                 <div class="grow scroll">${table(rank, u.L, u.t)}</div>
             </div>
             ${u.x ? '<div class="note">Shown at district level: the census gives no usable sub-district breakdown here.</div>' : ''}
-            ${a ? `<div class="aside">
-                <div class="where">Plus ${fmt(a.t)} people elsewhere in ${u.d || 'this'} district
-                    with no polygon of their own (towns, or areas the shapefile is missing):</div>
-                <div class="split">
-                    ${ring(aRank, a.L, a.t, 20)}
-                    <div class="grow scroll short">${table(aRank, a.L, a.t)}</div>
-                </div>
-            </div>` : ''}
+            ${extras}${districtAside}
             ${isPinned ? '' : '<div class="hint">Click to pin and scroll</div>'}`
     }
 

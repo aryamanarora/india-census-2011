@@ -1,0 +1,9 @@
+orphan_code,nearest_unit_id,orphan_name,nearest_tehsil,note
+00782,00779,Budaun,Bisauli,Budaun town has no polygon; nearest drawn Aligarh-division sibling
+00704,00705,Deoband,Rampur Maniharan,adjacent tehsils in Saharanpur
+00754,00749,Atrauli,Debai,nearest drawn sibling in Aligarh (loosest match ~27km)
+00346,00347,Kashipur,Jaspur,adjacent tehsils in Udham Singh Nagar
+00182,00181,Shimla (urban),Shimla (Rural),the city sits inside/beside the rural tehsil
+03807,03811,Gondal,Jetpur,adjacent talukas in Rajkot
+05580,05581,Aland,Afzalpur,adjacent talukas in Kalaburagi
+01878,01877,Kakching,Thoubal,Kakching lies just south of Thoubal in Manipur

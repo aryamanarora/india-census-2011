@@ -537,10 +537,30 @@ const drawnDistricts = new Set()
 for (const [id, u] of Object.entries(units))
     if (geoIds.has(id) && u.dtKey) drawnDistricts.add(u.dtKey)
 
+// Some orphans can be placed: gadm's sub-district geometry gives them a location, and the
+// nearest drawn tehsil is recorded in the crosswalk. Those attach to that one tehsil (shown
+// only in its tooltip) instead of the whole district. The rest — no location we trust —
+// stay a district-level aside shown in every sibling.
+const ORPHAN_NEAREST = new Map(
+    readObjects('crosswalk/india_orphan_nearest.csv').map(r => [r.orphan_code, r.nearest_unit_id])
+)
+
 let folded = 0, foldedPop = 0
 for (const [id, u] of Object.entries(units)) {
     if (geoIds.has(id) || u.aside || !u.dtKey) continue // drawn, already an aside, or unfoldable
     if (!drawnDistricts.has(u.dtKey)) continue           // no drawn sibling to attach to
+
+    const near = ORPHAN_NEAREST.get(id)
+    if (near && geoIds.has(near)) {
+        // a placed orphan: its own aside, attached to the single nearest drawn tehsil
+        const okey = 'O:' + id
+        units[okey] = { country: u.country, aside: true, name: u.censusName, total: u.total, langs: u.langs }
+        ;(units[near].extras ??= []).push(okey)
+        folded++; foldedPop += u.total
+        delete units[id]
+        continue
+    }
+
     const akey = 'A:' + u.dtKey
     const a = units[akey] ?? (units[akey] = {
         country: u.country, aside: true, dtKey: u.dtKey, total: 0, langs: {},
@@ -630,17 +650,22 @@ for (const [id, u] of Object.entries(units)) {
         kb: u.nBroad, kn: u.nNarrow, o: +u.otherShare.toFixed(5),
         rb: u.rankBroad.slice(0, 8), rn: u.rankNarrow.slice(0, 8),
         x: u.coarse ? 1 : undefined, // district-level, no sub-district breakdown
-        // the people of this district who are on no polygon (municipal areas, missing tehsils)
+        // the district's people on no polygon (municipal areas, tehsils the shapefile lacks)
         a: u.dtKey && units['A:' + u.dtKey] ? 'A:' + u.dtKey : undefined,
+        // orphan sub-districts placed here as their nearest drawn tehsil
+        e: u.extras,
     }
 }
 
-// Not drawn — nothing in the shapefile is their shape — but shown in the tooltip of every
-// sub-district of the district they belong to.
+// Not drawn — nothing in the shapefile is their shape — but shown in a tooltip: the shared
+// district aside in every sibling, a placed orphan only in its nearest tehsil.
 const asides = {}
 for (const [id, u] of Object.entries(units)) {
     if (!u.aside) continue
-    asides[id] = { t: u.total, L: u.langs, rb: u.rankBroad.slice(0, 5), rn: u.rankNarrow.slice(0, 5) }
+    asides[id] = {
+        t: u.total, L: u.langs, rb: u.rankBroad.slice(0, 5), rn: u.rankNarrow.slice(0, 5),
+        n: u.name, // present only for a placed orphan (its census name)
+    }
 }
 
 writeFileSync('dist/data.json', JSON.stringify({ languages, units: compact, asides }))

@@ -38,6 +38,7 @@ Everything needed to match a census row to a polygon lives in `crosswalk/` as da
 | file | what it fixes |
 | --- | --- |
 | `india_subdistrict_fixes.csv` | census sub-district codes that don't match the shapefile |
+| `india_orphan_nearest.csv` | sub-districts the shapefile lacks → the nearest tehsil that has a polygon |
 | `pakistan_subdivision_aliases.csv` | tehsils the census and the shapefile name differently |
 | `pakistan_language_map.csv` | Pakistani language names onto Indian census categories |
 | `nepal_language_map.csv` | Nepali language names onto Indian census categories |
@@ -50,15 +51,20 @@ under Hindi, the way India counts it? Each row carries a `note` recording which 
 
 All of these are printed by the build. They are the honest limits of the sources:
 
-- **13.5 million people are in the tooltip but not on the map.** The census reports the
-  larger municipal corporations as "Area not under any Sub-district" — they belong to a
-  district but to none of its tehsils, and the shapefile has no polygon that is their
-  shape. Rather than dropping them (they include most of urban West Bengal) or smearing
-  them across the district, each one is shown as a second table in the tooltip of every
-  tehsil of its district. Hovering a Darjeeling tehsil tells you it is 97% Nepali *and*
-  that the district's towns, 517,000 people, are 36% Nepali and 31% Bengali.
-- **5.8 million people (0.36%) are on no map at all.** Their census sub-districts have no
-  polygon in the shapefile, mostly places created after it was drawn.
+- **~22 million people are in a tooltip but not drawn on the map.** They belong to a
+  district but to no polygon in it, either because the census keeps them outside any
+  sub-district (a municipal corporation — "Area not under any Sub-district") or because the
+  shapefile is simply missing their tehsil. Rather than dropping them or smearing them
+  across the district:
+  - Municipal areas with no location of their own show as a second table in the tooltip of
+    every tehsil of their district. Hovering a Darjeeling tehsil tells you it is 97% Nepali
+    *and* that the district's towns, 517,000 people, are 36% Nepali and 31% Bengali.
+  - Missing sub-districts we *can* locate (via the sub-district geometry in
+    `misc/gadm36_IND_3.json`) are attached to the single nearest tehsil that does have a
+    polygon — see `crosswalk/india_orphan_nearest.csv`. Hovering Bisauli shows Budaun's
+    million people (Hindi 88%, Urdu 12%) as its nearest mapped neighbour.
+- **358,000 people (0.02%) are on no map at all** — the six FATA Frontier Regions, which
+  have no polygon and no drawable sibling to attach to.
 - **16 districts are drawn at district level rather than sub-district.** The tooltip says
   so when you're on one. Three reasons:
   - *2 Indian districts* (Bangalore, Dharwad) have sub-district rows covering less than
