@@ -78,9 +78,16 @@
 
             .legend { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 14px;
                       overflow-y: auto; font-size: 12.5px; }
-            .legend .row { display: flex; align-items: center; gap: 8px; padding: 1.5px 0; }
+            .legend .row { display: grid; grid-template-columns: 12px 1fr 44px 52px;
+                           align-items: center; gap: 8px; padding: 1.5px 0; }
+            .legend .row.head { color: var(--muted); font-size: 10px; font-weight: 600;
+                                text-transform: uppercase; letter-spacing: 0.05em;
+                                padding-bottom: 3px; margin-top: 2px;
+                                border-bottom: 1px solid var(--line); }
             .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
-            .legend .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .legend .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .legend .num { text-align: right; font-variant-numeric: tabular-nums; }
+            .legend .row:not(.head) .num { color: var(--muted); }
             .legend .fam { color: var(--muted); font-size: 11px; }
             .legend .ramp { height: 10px; border-radius: 3px; margin: 4px 0 3px; }
             .legend .ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }

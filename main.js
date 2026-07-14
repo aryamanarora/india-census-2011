@@ -400,25 +400,55 @@ function start(map, { languages, units, asides }) {
 
     // ------------------------------------------------------------ legend
 
+    const short = n => new Intl.NumberFormat('en-US', {
+        notation: 'compact', maximumFractionDigits: n < 1e7 ? 1 : 0,
+    }).format(n)
+
     function drawLegend(spec) {
         legend.html('')
         if (spec.categorical) {
-            // name the languages actually on screen, commonest first
+            // What each colour is actually worth: how many units carry it and how many
+            // people live in them. In the second- and third-largest views especially, a
+            // language's own speaker count would be the wrong number — what you want to
+            // know is how much of the map it accounts for.
             const seen = new Map()
             for (const f of map.features) {
                 const u = units[f.properties.id]
                 if (!u) continue
                 const id = spec.pick(u)
-                if (id) seen.set(id, (seen.get(id) || 0) + 1)
+                if (!id) continue
+                if (!seen.has(id)) seen.set(id, { units: new Set(), people: 0 })
+                const s = seen.get(id)
+                if (!s.units.has(f.properties.id)) { // one unit, several polygons
+                    s.units.add(f.properties.id)
+                    s.people += u.t
+                }
             }
-            const top = [...seen].sort((a, b) => b[1] - a[1]).slice(0, 18)
+            const top = [...seen].sort((a, b) => b[1].people - a[1].people).slice(0, 18)
+
             legend.append('div').attr('class', 'fam')
                 .text(`${seen.size} languages shown; hue is the family`)
-            for (const [id] of top) {
+            const rankLabel = { top1: '', top2: 'second ', top3: 'third ' }[state.view.split('.')[0]]
+            const of = `where it is the ${rankLabel}largest`
+            const head = legend.append('div').attr('class', 'row head')
+            head.append('div').attr('class', 'swatch')
+            head.append('div').attr('class', 'name').text('Language')
+            head.append('div').attr('class', 'num').attr('title', `Areas ${of}`).text('Areas')
+            head.append('div').attr('class', 'num')
+                .attr('title', `People living in the areas ${of} — not its speakers`).text('People')
+
+            for (const [id, s] of top) {
                 const row = legend.append('div').attr('class', 'row')
                 row.append('div').attr('class', 'swatch').style('background', colorOf(id))
-                row.append('div').attr('class', 'name').text(languages[id].name)
-                row.append('div').attr('class', 'fam').text(languages[id].family)
+                row.append('div').attr('class', 'name')
+                    .attr('title', `${languages[id].name} — ${languages[id].family}`)
+                    .text(languages[id].name)
+                row.append('div').attr('class', 'num')
+                    .attr('title', `${languages[id].name} is the ${rankLabel}largest in ${s.units.size.toLocaleString('en-US')} areas`)
+                    .text(s.units.size.toLocaleString('en-US'))
+                row.append('div').attr('class', 'num')
+                    .attr('title', `${s.people.toLocaleString('en-US')} people live there`)
+                    .text(short(s.people))
             }
             if (seen.size > top.length)
                 legend.append('div').attr('class', 'fam').style('padding-top', '4px')
