@@ -229,23 +229,29 @@ function start(map, { languages, units, asides }) {
     // don't fit: a hovering tooltip can't take the pointer without stealing it from the map.
     let pinned = null
 
-    function highlight(id, on) {
-        d3.selectAll(nodesOf.get(id) || []).classed('hover', on)
-        if (on) d3.selectAll(nodesOf.get(id) || []).raise()
+    // Exactly one unit carries the highlight at a time. Clearing the previous one by class,
+    // not by re-running its mouseout, is what keeps edges from stranding: raising the hovered
+    // shape reorders the DOM and the browser then drops the matching mouseout, so a
+    // per-shape toggle leaks. This single source of truth can't.
+    let hovered = null
+    function setHover(id) {
+        if (id === hovered) return
+        if (hovered) d3.selectAll(nodesOf.get(hovered) || []).classed('hover', false)
+        hovered = id || null
+        if (hovered) d3.selectAll(nodesOf.get(hovered) || []).classed('hover', true).raise()
     }
 
     function unpin() {
         if (!pinned) return
-        highlight(pinned, false)
         pinned = null
+        setHover(null)
         tooltip.classed('pinned', false).style('opacity', 0)
     }
 
     function pin(id) {
-        if (pinned && pinned !== id) highlight(pinned, false)
         if (!show(id, true)) return unpin()
         pinned = id
-        highlight(id, true)
+        setHover(id)
         place()
     }
 
@@ -253,13 +259,14 @@ function start(map, { languages, units, asides }) {
         .on('mouseover', d => {
             const id = d.properties.id
             if (pinned) return // a pinned tooltip stays put until you dismiss it
-            highlight(id, true)
+            setHover(id)
             if (show(id, false)) place()
         })
         .on('mousemove', () => { if (!pinned) place() })
         .on('mouseout', d => {
             if (pinned) return
-            highlight(d.properties.id, false)
+            // ignore a stale mouseout for a shape we've already left
+            if (hovered === d.properties.id) setHover(null)
             tooltip.style('opacity', 0)
         })
         .on('click', d => {
