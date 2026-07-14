@@ -88,27 +88,52 @@
 
             .tooltip {
                 position: absolute; pointer-events: none; opacity: 0;
-                min-width: 250px; max-width: 320px; padding: 9px 11px;
+                width: 320px; max-width: 90vw;
+                padding: 9px 11px;
                 background: var(--panel); color: var(--ink);
                 border: 1px solid var(--line); border-radius: 8px;
                 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
                 font-size: 12.5px; transition: opacity 120ms;
             }
-            .tooltip h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
-            .tooltip .where, .tooltip .note { color: var(--muted); font-size: 11.5px; }
+            .tooltip.pinned {
+                pointer-events: auto;
+                border-color: var(--muted);
+                box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+            }
+            .tooltip h2 { margin: 0; padding-right: 18px; font-size: 13.5px; font-weight: 600; }
+            .tooltip .where, .tooltip .note, .tooltip .hint { color: var(--muted); font-size: 11.5px; }
             .tooltip .note { margin-top: 5px; font-style: italic; }
+            .tooltip .hint { margin-top: 6px; text-align: right; opacity: 0.75; }
             .tooltip .split { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
             .tooltip .split svg { flex: none; }
             .tooltip .grow { flex: 1; min-width: 0; }
-            .tooltip table { width: 100%; border-collapse: collapse; }
-            .tooltip td { padding: 1px 0; white-space: nowrap; }
-            .tooltip td:first-child { overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 99%; }
-            .tooltip td:nth-child(2), .tooltip td:nth-child(3) { text-align: right;
-                font-variant-numeric: tabular-nums; padding-left: 8px; }
-            .tooltip td:nth-child(3) { color: var(--muted); }
+
+            /* Every language is listed; the list itself scrolls, sized in JS to show exactly
+               five rows however tall they wrap to. Only this area scrolls — the ring, the
+               header and the aside stay put. */
+            .tooltip .scroll { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+            .tooltip .scroll::-webkit-scrollbar { width: 7px; }
+            .tooltip .scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+            .tooltip table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            .tooltip td { padding: 1px 0; vertical-align: top; }
+            /* names wrap rather than widening the card or getting cut off */
+            .tooltip td:first-child { white-space: normal; overflow-wrap: anywhere; }
+            .tooltip td:nth-child(2), .tooltip td:nth-child(3) { text-align: right; white-space: nowrap;
+                font-variant-numeric: tabular-nums; padding-left: 10px; }
+            .tooltip td:nth-child(2) { width: 68px; }
+            .tooltip td:nth-child(3) { width: 48px; color: var(--muted); }
             .tooltip .chip { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
                 margin-right: 5px; vertical-align: baseline; }
             .tooltip .aside { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--line); }
+            .tooltip .close {
+                position: absolute; top: 6px; right: 7px;
+                width: 20px; height: 20px; padding: 0; line-height: 18px;
+                font-size: 16px; cursor: pointer;
+                color: var(--muted); background: none;
+                border: 1px solid transparent; border-radius: 4px;
+            }
+            .tooltip .close:hover { color: var(--ink); border-color: var(--line); }
 
             footer { padding-bottom: 12px; font-size: 11px; color: var(--muted); }
             footer a { color: var(--muted); }

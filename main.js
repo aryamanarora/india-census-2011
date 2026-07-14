@@ -202,20 +202,73 @@ function start(map, { languages, units, asides }) {
             .style('top', Math.max(8, Math.min(y - 20, window.innerHeight - box.height - 8)) + 'px')
     }
 
+    // Show exactly N rows and scroll the rest. Rows wrap to different heights, so the only
+    // way to land on a whole number of them is to measure.
+    const VISIBLE_ROWS = 5, VISIBLE_ROWS_ASIDE = 3
+    function sizeLists() {
+        tooltip.selectAll('.scroll').each(function () {
+            const n = this.classList.contains('short') ? VISIBLE_ROWS_ASIDE : VISIBLE_ROWS
+            const rows = this.querySelectorAll('tr')
+            if (rows.length <= n) { this.style.maxHeight = ''; return }
+            let h = 0
+            for (let i = 0; i < n; i++) h += rows[i].getBoundingClientRect().height
+            this.style.maxHeight = Math.ceil(h) + 'px'
+        })
+    }
+
+    function show(id, isPinned) {
+        const html = describe(id, isPinned)
+        if (!html) return false
+        tooltip.classed('pinned', !!isPinned).html(html).style('opacity', 1)
+        sizeLists()
+        if (isPinned) tooltip.select('.close').on('click', unpin)
+        return true
+    }
+
+    // Clicking a unit pins its tooltip, which is the only way to reach the parts of it that
+    // don't fit: a hovering tooltip can't take the pointer without stealing it from the map.
+    let pinned = null
+
+    function highlight(id, on) {
+        d3.selectAll(nodesOf.get(id) || []).classed('hover', on)
+        if (on) d3.selectAll(nodesOf.get(id) || []).raise()
+    }
+
+    function unpin() {
+        if (!pinned) return
+        highlight(pinned, false)
+        pinned = null
+        tooltip.classed('pinned', false).style('opacity', 0)
+    }
+
+    function pin(id) {
+        if (pinned && pinned !== id) highlight(pinned, false)
+        if (!show(id, true)) return unpin()
+        pinned = id
+        highlight(id, true)
+        place()
+    }
+
     paths
         .on('mouseover', d => {
-            const nodes = nodesOf.get(d.properties.id) || []
-            d3.selectAll(nodes).classed('hover', true).raise()
-            const html = describe(d.properties.id)
-            if (!html) return
-            tooltip.html(html).style('opacity', 1)
-            place()
+            const id = d.properties.id
+            if (pinned) return // a pinned tooltip stays put until you dismiss it
+            highlight(id, true)
+            if (show(id, false)) place()
         })
-        .on('mousemove', place)
+        .on('mousemove', () => { if (!pinned) place() })
         .on('mouseout', d => {
-            d3.selectAll(nodesOf.get(d.properties.id) || []).classed('hover', false)
+            if (pinned) return
+            highlight(d.properties.id, false)
             tooltip.style('opacity', 0)
         })
+        .on('click', d => {
+            d3.event.stopPropagation()
+            pin(d.properties.id)
+        })
+
+    svg.on('click', unpin)
+    d3.select(document).on('keydown', () => { if (d3.event.key === 'Escape') unpin() })
 
     window.addEventListener('resize', () => {
         fit(map.features)
@@ -228,19 +281,26 @@ function start(map, { languages, units, asides }) {
     const fmt = n => (n || 0).toLocaleString('en-US')
     const pct = x => (100 * x).toFixed(x < 0.1 ? 2 : 1) + '%'
 
-    // A ring of the composition, in the same colours as the map. Whatever is not in the
-    // top few is one grey slice, so the ring always closes and always sums to everyone.
+    // Every language spoken here, commonest first — not a top-5. The tooltip scrolls.
+    const rankAll = (L, kind) => Object.keys(L)
+        .filter(id => L[id] > 0 && languages[id].kind === kind)
+        .sort((a, b) => L[b] - L[a])
+
+    // A ring of the composition, in the same colours as the map. Past the first handful the
+    // slices are too thin to read, so the tail becomes one grey slice — the ring still
+    // closes, and still accounts for everyone.
+    const RING_SLICES = 6
     function ring(rank, L, total, r = 26) {
         if (!total) return ''
-        const shown = rank.reduce((s, id) => s + (L[id] || 0), 0)
-        const slices = rank.map(id => [colorOf(id), L[id] || 0])
+        const head = rank.slice(0, RING_SLICES)
+        const shown = head.reduce((s, id) => s + L[id], 0)
+        const slices = head.map(id => [colorOf(id), L[id]])
         if (shown < total) slices.push([NO_DATA, total - shown])
 
         const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r)
         const pie = d3.pie().sort(null).value(d => d[1])
         return `<svg width="${2 * r}" height="${2 * r}" viewBox="${-r} ${-r} ${2 * r} ${2 * r}">`
-            + pie(slices).map(s =>
-                `<path d="${arc(s)}" fill="${s.data[0]}"></path>`).join('')
+            + pie(slices).map(s => `<path d="${arc(s)}" fill="${s.data[0]}"></path>`).join('')
             + '</svg>'
     }
 
@@ -251,30 +311,39 @@ function start(map, { languages, units, asides }) {
             <td>${pct(L[id] / total)}</td></tr>`).join('')}</table>`
     }
 
-    function describe(id) {
+    function describe(id, isPinned) {
         const u = units[id]
         if (!u) return null
         const kind = currentKind()
-        const rank = (kind === 'broad' ? u.rb : u.rn).slice(0, 5)
+        const rank = rankAll(u.L, kind)
         const where = [u.d, u.s].filter(Boolean).join(', ')
         const bits = (kind === 'broad' ? u.eb : u.en).toFixed(2)
+        const noun = kind === 'broad' ? 'languages' : 'mother tongues'
 
         // The census reports some of this district's people — a municipal corporation —
         // outside any sub-district, so they are on no polygon anywhere. Show them next to
         // the tehsil rather than letting them vanish.
         const a = u.a && asides[u.a]
-        const aRank = a ? (kind === 'broad' ? a.rb : a.rn).slice(0, 3) : []
+        const aRank = a ? rankAll(a.L, kind) : []
 
-        return `<h2>${u.n}</h2>
+        return `${isPinned ? '<button class="close" title="Close (Esc)">&times;</button>' : ''}
+            <h2>${u.n}</h2>
             ${where ? `<div class="where">${where}</div>` : ''}
-            <div class="where">${fmt(u.t)} people · ${bits} bits of diversity</div>
-            <div class="split">${ring(rank, u.L, u.t)}<div class="grow">${table(rank, u.L, u.t)}</div></div>
+            <div class="where">${fmt(u.t)} people · ${rank.length} ${noun} · ${bits} bits of diversity</div>
+            <div class="split">
+                ${ring(rank, u.L, u.t)}
+                <div class="grow scroll">${table(rank, u.L, u.t)}</div>
+            </div>
             ${u.x ? '<div class="note">Shown at district level: the census gives no usable sub-district breakdown here.</div>' : ''}
             ${a ? `<div class="aside">
                 <div class="where">Plus ${fmt(a.t)} people in ${u.d || 'this'} district that the census
                     places in no sub-district (its towns), and so are on no polygon:</div>
-                <div class="split">${ring(aRank, a.L, a.t, 20)}<div class="grow">${table(aRank, a.L, a.t)}</div></div>
-            </div>` : ''}`
+                <div class="split">
+                    ${ring(aRank, a.L, a.t, 20)}
+                    <div class="grow scroll short">${table(aRank, a.L, a.t)}</div>
+                </div>
+            </div>` : ''}
+            ${isPinned ? '' : '<div class="hint">Click to pin and scroll</div>'}`
     }
 
     // ------------------------------------------------------------ views
@@ -491,6 +560,8 @@ function start(map, { languages, units, asides }) {
             return (u && spec.fill(u)) || NO_DATA
         })
         drawLegend(spec)
+        // a pinned tooltip lists languages or mother tongues depending on the view
+        if (pinned) show(pinned, true)
         if (state.dots) {
             // The dots carry the colour, so the choropleth underneath them becomes a
             // plain basemap — otherwise the two encodings fight each other.
