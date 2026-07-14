@@ -537,22 +537,35 @@ const drawnDistricts = new Set()
 for (const [id, u] of Object.entries(units))
     if (geoIds.has(id) && u.dtKey) drawnDistricts.add(u.dtKey)
 
-// Some orphans can be placed: gadm's sub-district geometry gives them a location, and the
-// nearest drawn tehsil is recorded in the crosswalk. Those attach to that one tehsil (shown
-// only in its tooltip) instead of the whole district. The rest — no location we trust —
-// stay a district-level aside shown in every sibling.
+// A missing Indian sub-district is placed against one drawn tehsil, shown only in its
+// tooltip. Where gadm's taluk geometry gives a real location, the crosswalk names the true
+// nearest tehsil. Otherwise we guess: the drawn sibling whose census code is closest, since
+// codes run in a rough spatial order within a district. Every orphan lands somewhere — the
+// tooltip is careful to say it is standing in for a place with no polygon of its own.
 const ORPHAN_NEAREST = new Map(
     readObjects('crosswalk/india_orphan_nearest.csv').map(r => [r.orphan_code, r.nearest_unit_id])
 )
+const drawnByDtKey = new Map()
+for (const [id, u] of Object.entries(units))
+    if (geoIds.has(id) && u.dtKey) (drawnByDtKey.get(u.dtKey) ?? drawnByDtKey.set(u.dtKey, []).get(u.dtKey)).push(id)
+
+const nearestByCode = (code, dtKey) => {
+    const sibs = drawnByDtKey.get(dtKey)
+    if (!sibs || !sibs.length) return null
+    const n = parseInt(code)
+    return sibs.reduce((best, s) => Math.abs(parseInt(s) - n) < Math.abs(parseInt(best) - n) ? s : best)
+}
 
 let folded = 0, foldedPop = 0
 for (const [id, u] of Object.entries(units)) {
     if (geoIds.has(id) || u.aside || !u.dtKey) continue // drawn, already an aside, or unfoldable
     if (!drawnDistricts.has(u.dtKey)) continue           // no drawn sibling to attach to
 
-    const near = ORPHAN_NEAREST.get(id)
+    const near = (ORPHAN_NEAREST.get(id) && geoIds.has(ORPHAN_NEAREST.get(id)))
+        ? ORPHAN_NEAREST.get(id)
+        : (u.country === 'IN' ? nearestByCode(id, u.dtKey) : null)
     if (near && geoIds.has(near)) {
-        // a placed orphan: its own aside, attached to the single nearest drawn tehsil
+        // a placed orphan: its own aside, attached to the one nearest drawn tehsil
         const okey = 'O:' + id
         units[okey] = { country: u.country, aside: true, name: u.censusName, total: u.total, langs: u.langs }
         ;(units[near].extras ??= []).push(okey)

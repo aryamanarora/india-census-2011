@@ -54,18 +54,20 @@ All of these are printed by the build. They are the honest limits of the sources
 - **~22 million people are in a tooltip but not drawn on the map.** They belong to a
   district but to no polygon in it, either because the census keeps them outside any
   sub-district (a municipal corporation — "Area not under any Sub-district") or because the
-  shapefile is simply missing their tehsil. Rather than dropping them or smearing them
-  across the district:
+  shapefile is simply missing their tehsil. Every one is reachable in some tooltip:
   - Municipal areas with no location of their own show as a second table in the tooltip of
     every tehsil of their district. Hovering a Darjeeling tehsil tells you it is 97% Nepali
     *and* that the district's towns, 517,000 people, are 36% Nepali and 31% Bengali.
-  - Missing sub-districts we *can* locate (via the sub-district geometry in
-    `misc/gadm36_IND_3.json`) are attached to the single nearest tehsil that does have a
-    polygon — see `crosswalk/india_orphan_nearest.csv`. Hovering Bisauli shows Budaun's
-    million people (Hindi 88%, Urdu 12%) as its nearest mapped neighbour.
-- **358,000 people (0.02%) are on no map at all** — the six FATA Frontier Regions, which
-  have no polygon and no drawable sibling to attach to.
-- **16 districts are drawn at district level rather than sub-district.** The tooltip says
+  - Missing sub-districts attach to one drawn tehsil, shown only in its tooltip. Where
+    gadm's sub-district geometry (`misc/gadm36_IND_3.json`) gives a real location, that's
+    the true nearest tehsil (`crosswalk/india_orphan_nearest.csv`); otherwise it's a guess —
+    the drawn sibling with the closest census code, since codes run in rough spatial order.
+    Hovering Bisauli shows Budaun's million people (Hindi 88%, Urdu 12%).
+- **Nothing with census data is left off the map.** The six FATA Frontier Regions do have
+  polygons (`FR KOHAT` …) and data (~98% Pashto); an earlier parsing bug hid them, now
+  fixed. Azad Kashmir and Gilgit-Baltistan are the only blank areas — the 2017 language
+  census doesn't cover them — and hovering one says so rather than showing nothing.
+- **6 districts are drawn at district level rather than sub-district.** The tooltip says
   so when you're on one. Three reasons:
   - *2 Indian districts* (Bangalore, Dharwad) have sub-district rows covering less than
     half the district — Bangalore's four tehsils hold 1.2M of its 9.6M people, so drawing
@@ -75,7 +77,7 @@ All of these are printed by the build. They are the honest limits of the sources
     five tehsils are missing their Hindi head row and a sixth carries all six totals. The
     build checks that every broad language equals the sum of the mother tongues under it —
     true for 101,645 of 101,646 pairs — and falls back to district level here.
-  - *13 Pakistani districts* have tehsils the shapefile predates (Lahore's Model Town,
+  - *3 Pakistani districts* have tehsils the shapefile predates (Lahore's Model Town,
     Shalimar and Raiwind), so their sub-divisions can't all be drawn.
 - **Azad Kashmir and Gilgit-Baltistan are grey.** The 2017 Pakistani language tables don't
   cover them.

@@ -216,8 +216,19 @@ function start(map, { languages, units, asides }) {
         })
     }
 
-    function show(id, isPinned) {
-        const html = describe(id, isPinned)
+    // A polygon the census doesn't cover (Azad Kashmir, Gilgit-Baltistan) still says what it
+    // is and why it's blank, so no shape on the map is silent when hovered.
+    function noDataCard(p) {
+        const where = [p.district, p.state].filter(Boolean).join(', ')
+        return `<h2>${p.name || 'Unmapped area'}</h2>
+            ${where ? `<div class="where">${where}</div>` : ''}
+            <div class="note">No census language data — ${p.country === 'PK'
+                ? 'Azad Kashmir and Gilgit-Baltistan are outside the 2017 language census.'
+                : 'not covered by the census tables used here.'}</div>`
+    }
+
+    function show(id, isPinned, props) {
+        const html = describe(id, isPinned) || (props && !isPinned ? noDataCard(props) : null)
         if (!html) return false
         tooltip.classed('pinned', !!isPinned).html(html).style('opacity', 1)
         sizeLists()
@@ -260,7 +271,7 @@ function start(map, { languages, units, asides }) {
             const id = d.properties.id
             if (pinned) return // a pinned tooltip stays put until you dismiss it
             setHover(id)
-            if (show(id, false)) place()
+            if (show(id, false, d.properties)) place()
         })
         .on('mousemove', () => { if (!pinned) place() })
         .on('mouseout', d => {
@@ -271,7 +282,7 @@ function start(map, { languages, units, asides }) {
         })
         .on('click', d => {
             d3.event.stopPropagation()
-            pin(d.properties.id)
+            if (units[d.properties.id]) pin(d.properties.id) // only real units can be pinned
         })
 
     svg.on('click', unpin)
