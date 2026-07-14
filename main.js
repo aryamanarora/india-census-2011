@@ -290,9 +290,9 @@ function start(map, { languages, units, asides }) {
     // slices are too thin to read, so the tail becomes one grey slice — the ring still
     // closes, and still accounts for everyone.
     const RING_SLICES = 6
-    function ring(rank, L, total, r = 26) {
+    function ring(rank, L, total, r = 26, n = RING_SLICES) {
         if (!total) return ''
-        const head = rank.slice(0, RING_SLICES)
+        const head = rank.slice(0, n)
         const shown = head.reduce((s, id) => s + L[id], 0)
         const slices = head.map(id => [colorOf(id), L[id]])
         if (shown < total) slices.push([NO_DATA, total - shown])
@@ -400,59 +400,89 @@ function start(map, { languages, units, asides }) {
 
     // ------------------------------------------------------------ legend
 
+    // 1.6B, not 2B; 529M, not 529.0M
     const short = n => new Intl.NumberFormat('en-US', {
-        notation: 'compact', maximumFractionDigits: n < 1e7 ? 1 : 0,
+        notation: 'compact', maximumFractionDigits: n >= 1e9 || n < 1e7 ? 1 : 0,
     }).format(n)
 
     function drawLegend(spec) {
         legend.html('')
         if (spec.categorical) {
-            // What each colour is actually worth: how many units carry it and how many
-            // people live in them. In the second- and third-largest views especially, a
-            // language's own speaker count would be the wrong number — what you want to
-            // know is how much of the map it accounts for.
+            const kind = currentKind()
+            // Three different quantities, and they are genuinely different: Telugu is the
+            // largest language in more areas than Tamil, those areas hold fewer people, and
+            // more people speak Telugu than either count implies.
+            //   areas  — how many units carry this colour
+            //   covers — how many people live in them
+            //   people — how many people speak the language, anywhere on the map
             const seen = new Map()
             for (const f of map.features) {
                 const u = units[f.properties.id]
                 if (!u) continue
                 const id = spec.pick(u)
                 if (!id) continue
-                if (!seen.has(id)) seen.set(id, { units: new Set(), people: 0 })
+                if (!seen.has(id)) seen.set(id, { areas: new Set(), covers: 0 })
                 const s = seen.get(id)
-                if (!s.units.has(f.properties.id)) { // one unit, several polygons
-                    s.units.add(f.properties.id)
-                    s.people += u.t
+                if (!s.areas.has(f.properties.id)) { // one unit, several polygons
+                    s.areas.add(f.properties.id)
+                    s.covers += u.t
                 }
             }
-            const top = [...seen].sort((a, b) => b[1].people - a[1].people).slice(0, 18)
+            const speakers = id => languages[id].total || 0
+            const rows = [...seen].sort((a, b) => b[1].covers - a[1].covers)
 
-            legend.append('div').attr('class', 'fam')
-                .text(`${seen.size} languages shown; hue is the family`)
+            // The whole map in one ring: every language of this kind, by speakers.
+            const world = Object.keys(languages)
+                .filter(id => languages[id].kind === kind && speakers(id) > 0)
+                .sort((a, b) => speakers(b) - speakers(a))
+            const grand = world.reduce((s, id) => s + speakers(id), 0)
+            const L = Object.fromEntries(world.map(id => [id, speakers(id)]))
+
+            const MASTER_SLICES = 10
+            const master = legend.append('div').attr('class', 'master')
+            master.append('div').attr('class', 'ring').html(ring(world, L, grand, 34, MASTER_SLICES))
+            const cap = master.append('div').attr('class', 'grow')
+            cap.append('div').attr('class', 'big').text(short(grand) + ' people')
+            cap.append('div').attr('class', 'fam')
+                .text(`${world.length} ${kind === 'broad' ? 'languages' : 'mother tongues'}, `
+                    + `${seen.size} of them largest somewhere. Hue is the family.`)
+            // name the ring's slices on hover — an SVG shape needs a <title> child, an
+            // attribute does nothing
+            master.selectAll('svg path').each(function (_, i) {
+                const id = world[i] // past the last slice: the grey remainder
+                d3.select(this).append('title').text(id && i < MASTER_SLICES
+                    ? `${languages[id].name} — ${fmt(speakers(id))} (${pct(speakers(id) / grand)})`
+                    : `everyone else — ${fmt(grand - world.slice(0, MASTER_SLICES).reduce((s, x) => s + speakers(x), 0))}`)
+            })
+
             const rankLabel = { top1: '', top2: 'second ', top3: 'third ' }[state.view.split('.')[0]]
-            const of = `where it is the ${rankLabel}largest`
+            const where = `where it is the ${rankLabel}largest`
             const head = legend.append('div').attr('class', 'row head')
             head.append('div').attr('class', 'swatch')
             head.append('div').attr('class', 'name').text('Language')
-            head.append('div').attr('class', 'num').attr('title', `Areas ${of}`).text('Areas')
+            head.append('div').attr('class', 'num').attr('title', `Areas ${where}`).text('Areas')
             head.append('div').attr('class', 'num')
-                .attr('title', `People living in the areas ${of} — not its speakers`).text('People')
+                .attr('title', `People living in the areas ${where}`).text('Covers')
+            head.append('div').attr('class', 'num')
+                .attr('title', 'People who speak it, anywhere on the map').text('People')
 
-            for (const [id, s] of top) {
-                const row = legend.append('div').attr('class', 'row')
+            const list = legend.append('div').attr('class', 'list')
+            for (const [id, s] of rows) {
+                const row = list.append('div').attr('class', 'row')
                 row.append('div').attr('class', 'swatch').style('background', colorOf(id))
                 row.append('div').attr('class', 'name')
                     .attr('title', `${languages[id].name} — ${languages[id].family}`)
                     .text(languages[id].name)
                 row.append('div').attr('class', 'num')
-                    .attr('title', `${languages[id].name} is the ${rankLabel}largest in ${s.units.size.toLocaleString('en-US')} areas`)
-                    .text(s.units.size.toLocaleString('en-US'))
+                    .attr('title', `${languages[id].name} is the ${rankLabel}largest in ${fmt(s.areas.size)} areas`)
+                    .text(s.areas.size.toLocaleString('en-US'))
                 row.append('div').attr('class', 'num')
-                    .attr('title', `${s.people.toLocaleString('en-US')} people live there`)
-                    .text(short(s.people))
+                    .attr('title', `${fmt(s.covers)} people live in those areas`)
+                    .text(short(s.covers))
+                row.append('div').attr('class', 'num')
+                    .attr('title', `${fmt(speakers(id))} people speak ${languages[id].name}`)
+                    .text(short(speakers(id)))
             }
-            if (seen.size > top.length)
-                legend.append('div').attr('class', 'fam').style('padding-top', '4px')
-                    .text(`… and ${seen.size - top.length} more`)
             return
         }
         const { title, lo, hi } = spec.legend

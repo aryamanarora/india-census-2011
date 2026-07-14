@@ -405,10 +405,9 @@ function stats(u) {
 
 for (const u of Object.values(units)) Object.assign(u, stats(u))
 
-// language totals, used to order the picker and shade the palette
-for (const u of Object.values(units))
-    for (const [id, n] of Object.entries(u.langs))
-        languages[id].total = (languages[id].total || 0) + n
+// Language totals are computed further down, once we know which units have a polygon —
+// they have to count exactly the people the map can show, or the legend won't reconcile
+// with the map underneath it.
 
 // ---------------------------------------------------------------- geometry
 
@@ -512,6 +511,17 @@ for (const f of features) {
     u.name = f.properties.name
     u.district = f.properties.district
     u.state = f.properties.state
+}
+
+// ---------------------------------------------------------------- language totals
+
+// Count only units the map can actually show: those with a polygon, plus the municipal
+// areas the tooltip reports. The sub-districts with no polygon at all are excluded, so
+// every number in the legend adds up to something a reader can find on the map.
+for (const [unitId, u] of Object.entries(units)) {
+    if (!geoIds.has(unitId) && !u.aside) continue
+    for (const [id, n] of Object.entries(u.langs))
+        languages[id].total = (languages[id].total || 0) + n
 }
 
 // ---------------------------------------------------------------- validate

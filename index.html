@@ -47,7 +47,7 @@
             .panel {
                 position: absolute;
                 top: 16px; left: 16px;
-                width: 330px;
+                width: 366px;
                 max-height: calc(100vh - 32px);
                 display: flex;
                 flex-direction: column;
@@ -76,13 +76,24 @@
             .check label { margin: 0; text-transform: none; font-size: 13px; font-weight: 400;
                            letter-spacing: 0; color: var(--ink); }
 
+            /* header and master ring stay put; only the language list scrolls */
             .legend { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 14px;
-                      overflow-y: auto; font-size: 12.5px; }
-            .legend .row { display: grid; grid-template-columns: 12px 1fr 44px 52px;
-                           align-items: center; gap: 8px; padding: 1.5px 0; }
+                      font-size: 12.5px; display: flex; flex-direction: column;
+                      flex: 1; min-height: 0; }
+            .legend .list { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+            .legend .list::-webkit-scrollbar { width: 7px; }
+            .legend .list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+            .legend .master { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+            .legend .master .ring { flex: none; line-height: 0; }
+            .legend .grow { flex: 1; min-width: 0; }
+            .legend .big { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+            .legend .row { display: grid; grid-template-columns: 12px 1fr 38px 46px 46px;
+                           align-items: center; gap: 7px; padding: 1.5px 0; }
             .legend .row.head { color: var(--muted); font-size: 10px; font-weight: 600;
-                                text-transform: uppercase; letter-spacing: 0.05em;
-                                padding-bottom: 3px; margin-top: 2px;
+                                text-transform: uppercase; letter-spacing: 0.04em;
+                                padding-bottom: 3px; padding-right: 7px;
                                 border-bottom: 1px solid var(--line); }
             .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
             .legend .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
