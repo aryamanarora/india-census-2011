@@ -67,7 +67,7 @@ function writeHash() {
 const svg = d3.select('#map')
 const zoomLayer = svg.append('g')
 const land = zoomLayer.append('g').attr('id', 'land')
-const dotLayer = zoomLayer.append('g').attr('id', 'dots')
+const dotLayer = zoomLayer.append('g').attr('id', 'dot-layer')
 const tooltip = d3.select('body').append('div').attr('class', 'tooltip')
 const status = d3.select('#status')
 const legend = d3.select('#legend')
@@ -457,7 +457,7 @@ function start(map, { languages, units, asides }) {
                 }
             }
             const speakers = id => languages[id].total || 0
-            const rows = [...seen].sort((a, b) => b[1].covers - a[1].covers)
+            const rows = [...seen].sort((a, b) => speakers(b[0]) - speakers(a[0]))
 
             // The whole map in one ring: every language of this kind, by speakers.
             const world = Object.keys(languages)
