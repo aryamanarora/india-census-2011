@@ -3,7 +3,9 @@
 An interactive map of mother tongues in India, Pakistan, Nepal and Bangladesh, drawn from
 the census returns of each country. For every sub-district it shows the largest language,
 the largest mother tongue underneath it, how many are spoken, how linguistically diverse
-the place is, and where any one language is spoken as a share of the population.
+the place is, and where any one language is spoken as a share of the population. The
+**Population** control restricts any of these to urban or rural residents (India and
+Pakistan report the split; Nepal and Bangladesh give totals only, so they grey out there).
 
 Open `index.html` over a local server (`python3 -m http.server`) — the map fetches its
 data, so `file://` will not work.

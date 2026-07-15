@@ -44,6 +44,7 @@ const RAMP = d3.interpolateYlGnBu
 const state = {
     view: 'top1.b',
     lang: null,   // a language id; overrides view when set
+    pop: 'total', // total | urban | rural
     dots: false,
 }
 
@@ -51,6 +52,7 @@ function readHash() {
     const p = new URLSearchParams(location.hash.slice(1))
     if (p.has('lang')) state.lang = p.get('lang')
     if (p.has('view')) state.view = p.get('view')
+    if (['urban', 'rural'].includes(p.get('pop'))) state.pop = p.get('pop')
     state.dots = p.get('dots') === '1'
 }
 
@@ -58,6 +60,7 @@ function writeHash() {
     const p = new URLSearchParams()
     if (state.lang) p.set('lang', state.lang)
     else p.set('view', state.view)
+    if (state.pop !== 'total') p.set('pop', state.pop)
     if (state.dots) p.set('dots', '1')
     history.replaceState(null, '', '#' + p)
 }
@@ -169,6 +172,10 @@ function start(map, { languages, units, asides }) {
     d3.select('#lang').on('change', function () {
         state.lang = idByLabel.get(this.value) || null
         viewSelect.property('value', state.lang ? SINGLE : state.view)
+        render()
+    })
+    d3.select('#pop').on('change', function () {
+        state.pop = this.value
         render()
     })
     d3.select('#dots').on('change', function () {
@@ -329,49 +336,59 @@ function start(map, { languages, units, asides }) {
             <td>${pct(L[id] / total)}</td></tr>`).join('')}</table>`
     }
 
+    const popLabel = { total: '', urban: 'urban ', rural: 'rural ' }
+
     function describe(id, isPinned) {
         const u = units[id]
         if (!u) return null
         const kind = currentKind()
-        const rank = rankAll(u.L, kind)
         const where = [u.d, u.s].filter(Boolean).join(', ')
-        const bits = (kind === 'broad' ? u.eb : u.en).toFixed(2)
-        const noun = kind === 'broad' ? 'languages' : 'mother tongues'
+        const noun = (popLabel[state.pop]) + (kind === 'broad' ? 'languages' : 'mother tongues')
+        const closeBtn = isPinned ? '<button class="close" title="Close (Esc)">&times;</button>' : ''
+        const hint = isPinned ? '' : '<div class="hint">Click to pin and scroll</div>'
+
+        const self = splitL(u)
+        if (!self) return `${closeBtn}<h2>${u.n}</h2>
+            ${where ? `<div class="where">${where}</div>` : ''}
+            <div class="note">The census reports only a total here, no urban/rural split.</div>${hint}`
+
+        const rank = rankAll(self.L, kind)
+        const bits = entropyOf(self.L, self.t, kind).toFixed(2)
 
         // Some people belong here but are on no polygon of their own. A placed orphan is a
         // sub-district the shapefile is missing, shown against the nearest mapped tehsil (this
         // one). The district aside is everyone else with no polygon — municipal areas outside
         // any sub-district, tehsils drawn too new — shared across all the district's tehsils.
-        const block = (caption, side) => {
-            const r = rankAll(side.L, kind)
+        const block = (label, side) => {
+            const s = splitL(side)
+            if (!s || !s.t) return ''
+            const r = rankAll(s.L, kind)
             return `<div class="aside">
-                <div class="where">${caption}</div>
+                <div class="where">${label(s.t)}</div>
                 <div class="split">
-                    ${ring(r, side.L, side.t, 20)}
-                    <div class="grow scroll short">${table(r, side.L, side.t)}</div>
+                    ${ring(r, s.L, s.t, 20)}
+                    <div class="grow scroll short">${table(r, s.L, s.t)}</div>
                 </div>
             </div>`
         }
-        const extras = (u.e || []).map(aid => {
-            const o = asides[aid]
-            return block(`Plus ${o.n} (${fmt(o.t)} people), which the shapefile is missing —`
-                + ' shown here as its nearest mapped tehsil:', o)
-        }).join('')
-        const a = u.a && asides[u.a]
-        const districtAside = a ? block(`Plus ${fmt(a.t)} people elsewhere in ${u.d || 'this'} district`
-            + ' with no polygon of their own (towns, or areas the shapefile is missing):', a) : ''
+        const extras = (u.e || []).map(aid => block(t =>
+            `Plus ${asides[aid].n} (${fmt(t)} ${popLabel[state.pop]}people), which the shapefile is missing —`
+            + ' shown here as its nearest mapped tehsil:', asides[aid])).join('')
+        const districtAside = u.a ? block(t =>
+            `Plus ${fmt(t)} ${popLabel[state.pop]}people elsewhere in ${u.d || 'this'} district`
+            + ' with no polygon of their own (towns, or areas the shapefile is missing):', asides[u.a]) : ''
 
-        return `${isPinned ? '<button class="close" title="Close (Esc)">&times;</button>' : ''}
+        return `${closeBtn}
             <h2>${u.n}</h2>
             ${where ? `<div class="where">${where}</div>` : ''}
-            <div class="where">${fmt(u.t)} people · ${rank.length} ${noun} · ${bits} bits of diversity</div>
+            <div class="where">${fmt(self.t)} ${popLabel[state.pop]}people · ${rank.length} ${noun} · ${bits} bits of diversity</div>
             <div class="split">
-                ${ring(rank, u.L, u.t)}
-                <div class="grow scroll">${table(rank, u.L, u.t)}</div>
+                ${ring(rank, self.L, self.t)}
+                <div class="grow scroll">${table(rank, self.L, self.t)}</div>
             </div>
             ${u.x ? '<div class="note">Shown at district level: the census gives no usable sub-district breakdown here.</div>' : ''}
             ${extras}${districtAside}
-            ${isPinned ? '' : '<div class="hint">Click to pin and scroll</div>'}`
+            ${hint}`
     }
 
     // ------------------------------------------------------------ views
@@ -380,49 +397,88 @@ function start(map, { languages, units, asides }) {
         state.lang ? languages[state.lang].kind
             : state.view.endsWith('.n') ? 'narrow' : 'broad'
 
+    // The active population split — total, urban, or rural — as an effective {L, t}. Only
+    // India and Pakistan report the split; Nepal and Bangladesh have total only, so an
+    // urban or rural view returns null for them and they read as no-data.
+    function splitL(o) {
+        if (state.pop === 'total') return { L: o.L, t: o.t }
+        if (o.tu === undefined) return null
+        const Lu = o.Lu || {}
+        if (state.pop === 'urban') return { L: Lu, t: o.tu }
+        const L = {} // rural = total - urban
+        for (const id in o.L) { const r = o.L[id] - (Lu[id] || 0); if (r > 0) L[id] = r }
+        return { L, t: o.t - o.tu }
+    }
+
+    const entropyOf = (L, t, kind) => {
+        if (!t) return 0
+        let h = 0
+        for (const id in L) { if (languages[id].kind !== kind) continue; const p = L[id] / t; if (p > 0) h -= p * Math.log2(p) }
+        return h
+    }
+
+    // Per-unit stats for the choropleth. Total uses the values baked in at build time;
+    // urban and rural are derived here. Returns null when the unit has no split.
+    function statsOf(u) {
+        if (state.pop === 'total') return u
+        const s = splitL(u)
+        if (!s) return null
+        const { L, t } = s
+        const broad = [], narrow = []
+        for (const id in L) { const n = L[id]; if (!n) continue; (languages[id].kind === 'broad' ? broad : narrow).push([id, n]) }
+        const rank = xs => xs.sort((a, b) => b[1] - a[1]).map(x => x[0])
+        const eb = entropyOf(L, t, 'broad'), en = entropyOf(L, t, 'narrow')
+        const o = t ? narrow.reduce((a, [id, n]) => languages[id].other ? a + n : a, 0) / t : 0
+        return {
+            L, t, rb: rank(broad), rn: rank(narrow), kb: broad.length, kn: narrow.length,
+            eb: broad.length ? eb : en, en: narrow.length ? en : eb, o,
+        }
+    }
+
     // Each view returns {fill, legend}. fill(unit) -> colour or null for "no data".
     function layer() {
         if (state.lang) {
             const l = languages[state.lang]
-            const max = d3.max(Object.values(units), u => (u.L[state.lang] || 0) / (u.t || 1)) || 1
+            let max = 0
+            for (const u of Object.values(units)) { const s = splitL(u); if (!s || !s.t) continue; const p = (s.L[state.lang] || 0) / s.t; if (p > max) max = p }
+            max = max || 1
             return {
                 categorical: false,
-                fill: u => (u.t ? RAMP(0.08 + 0.92 * ((u.L[state.lang] || 0) / u.t) / max) : null),
+                fill: u => { const s = splitL(u); return (s && s.t) ? RAMP(0.08 + 0.92 * ((s.L[state.lang] || 0) / s.t) / max) : null },
                 legend: { title: `${l.name} as a share of the population`, lo: '0%', hi: pct(max) },
-                langs: u => (u.L[state.lang] ? [state.lang] : []),
+                langs: u => { const s = splitL(u); return (s && s.L[state.lang]) ? [state.lang] : [] },
             }
         }
 
         const [kind, which] = [currentKind(), state.view.split('.')[0]]
-        const rankOf = u => (kind === 'broad' ? u.rb : u.rn)
         const nth = { top1: 0, top2: 1, top3: 2 }[which]
 
         if (nth !== undefined) return {
             categorical: true,
-            fill: u => colorOf(rankOf(u)[nth]),
-            pick: u => rankOf(u)[nth],
-            langs: u => Object.keys(u.L).filter(id => languages[id].kind === kind),
+            fill: u => { const v = statsOf(u); return v ? colorOf((kind === 'broad' ? v.rb : v.rn)[nth]) : null },
+            pick: u => { const v = statsOf(u); return v ? (kind === 'broad' ? v.rb : v.rn)[nth] : null },
+            langs: u => { const s = splitL(u); return s ? Object.keys(s.L).filter(id => languages[id].kind === kind) : [] },
         }
 
         const ramp = (value, max, lo, hi, title) => ({
             categorical: false,
-            fill: u => (u.t ? RAMP(0.08 + 0.92 * Math.min(1, value(u) / max)) : null),
+            fill: u => { const v = statsOf(u); return (v && v.t) ? RAMP(0.08 + 0.92 * Math.min(1, value(v) / max)) : null },
             legend: { title, lo, hi },
-            langs: u => Object.keys(u.L).filter(id => languages[id].kind === kind),
+            langs: u => { const s = splitL(u); return s ? Object.keys(s.L).filter(id => languages[id].kind === kind) : [] },
         })
 
         if (which === 'count') {
-            const max = d3.max(Object.values(units), u => (kind === 'broad' ? u.kb : u.kn))
-            return ramp(u => (kind === 'broad' ? u.kb : u.kn), max, '0', String(max),
+            const max = d3.max(Object.values(units), u => { const v = statsOf(u); return v ? (kind === 'broad' ? v.kb : v.kn) : 0 })
+            return ramp(v => (kind === 'broad' ? v.kb : v.kn), max, '0', String(max),
                 kind === 'broad' ? 'Languages spoken' : 'Mother tongues spoken')
         }
         if (which === 'entropy')
-            return ramp(u => (kind === 'broad' ? u.eb : u.en), 4, '0 bits', '4 bits',
+            return ramp(v => (kind === 'broad' ? v.eb : v.en), 4, '0 bits', '4 bits',
                 'Shannon diversity of the language distribution')
         if (which === 'erasure')
-            return ramp(u => u.en - u.eb, 2.5, '0 bits', '2.5 bits',
+            return ramp(v => v.en - v.eb, 2.5, '0 bits', '2.5 bits',
                 'Diversity that disappears when mother tongues are grouped into languages')
-        return ramp(u => u.o, 1, '0%', '100%',
+        return ramp(v => v.o, 1, '0%', '100%',
             'Population whose mother tongue the census records only as "other"')
     }
 
@@ -443,6 +499,8 @@ function start(map, { languages, units, asides }) {
             //   areas  — how many units carry this colour
             //   covers — how many people live in them
             //   people — how many people speak the language, anywhere on the map
+            // All three follow the active total/urban/rural split.
+            const speak = new Map() // language id -> speakers under the active split
             const seen = new Map()
             for (const f of map.features) {
                 const u = units[f.properties.id]
@@ -453,14 +511,24 @@ function start(map, { languages, units, asides }) {
                 const s = seen.get(id)
                 if (!s.areas.has(f.properties.id)) { // one unit, several polygons
                     s.areas.add(f.properties.id)
-                    s.covers += u.t
+                    s.covers += splitL(u).t
                 }
             }
-            const speakers = id => languages[id].total || 0
+            // whole-map speaker totals for this split, over the units actually shown
+            const counted = new Set()
+            for (const f of map.features) {
+                const u = units[f.properties.id]
+                if (!u || counted.has(f.properties.id)) continue
+                counted.add(f.properties.id)
+                const sl = splitL(u)
+                if (!sl) continue
+                for (const id in sl.L) speak.set(id, (speak.get(id) || 0) + sl.L[id])
+            }
+            const speakers = id => speak.get(id) || 0
             const rows = [...seen].sort((a, b) => speakers(b[0]) - speakers(a[0]))
 
             // The whole map in one ring: every language of this kind, by speakers.
-            const world = Object.keys(languages)
+            const world = [...speak.keys()]
                 .filter(id => languages[id].kind === kind && speakers(id) > 0)
                 .sort((a, b) => speakers(b) - speakers(a))
             const grand = world.reduce((s, id) => s + speakers(id), 0)
@@ -613,12 +681,14 @@ function start(map, { languages, units, asides }) {
                 if (mine !== generation) return // superseded by a newer selection
             }
             const u = units[ids[i]]
+            const s = splitL(u) // urban/rural counts, or null where there's no split
+            if (!s) continue
             const pool = pixelsOf.get(ids[i])
             const centre = centroidOf.get(ids[i])
             if ((!pool || !pool.length) && !centre) continue
 
             for (const id of spec.langs(u)) {
-                let n = Math.round(u.L[id] / DOT_POP)
+                let n = Math.round((s.L[id] || 0) / DOT_POP)
                 if (!n) continue
                 total += n
                 let d = byLang.get(id) || ''
@@ -674,6 +744,7 @@ function start(map, { languages, units, asides }) {
     if (state.lang && !languages[state.lang]) state.lang = null
     if (!VIEWS.some(v => v.id === state.view)) state.view = 'top1.b'
     d3.select('#dots').property('checked', state.dots)
+    d3.select('#pop').property('value', state.pop)
     if (state.lang) {
         const opt = langOptions.find(o => o.id === state.lang)
         if (opt) d3.select('#lang').property('value', opt.label)

@@ -115,11 +115,17 @@ function foreignNarrowId(name, broadName) {
 const units = {}
 
 function unit(id, meta) {
-    if (!units[id]) units[id] = { ...meta, total: 0, langs: {} }
+    if (!units[id]) units[id] = { ...meta, total: 0, langs: {}, totalU: 0, langsU: {} }
     return units[id]
 }
 
-const add = (u, langId, n) => { if (n) u.langs[langId] = (u.langs[langId] || 0) + n }
+// n is the total count, nu the urban part of it (rural is derived as total - urban later).
+// Only India and Pakistan report the split; elsewhere nu is 0 and urban/rural views skip
+// the unit.
+const add = (u, langId, n, nu = 0) => {
+    if (n) u.langs[langId] = (u.langs[langId] || 0) + n
+    if (nu) u.langsU[langId] = (u.langsU[langId] || 0) + nu
+}
 
 // ---------------------------------------------------------------- India
 
@@ -212,8 +218,10 @@ let indiaRows = 0
 for (const rows of indiaTables) {
     let stateName = ''
     for (const r of rows) {
-        // cols: 0 table, 1 state, 2 district, 3 sub-district, 4 area name, 5 mt code, 6 mt name, 7 total P
+        // cols: 0 table, 1 state, 2 district, 3 sub-district, 4 area name, 5 mt code,
+        //       6 mt name, 7 total-P, 10 rural-P, 13 urban-P
         const [, , district, sub, areaName, mtCode, mtName, totalP] = r
+        const urbanP = r[13]
         if (!/^\d{6}$/.test(mtCode || '')) continue // header cruft
         if (district === '000') { stateName = areaName.trim(); continue }
 
@@ -249,6 +257,7 @@ for (const rows of indiaTables) {
             censusState: titleCase(stateName),
         })
         const n = parseInt(totalP) || 0
+        const nu = parseInt(urbanP) || 0
         const name = mtName.trim()
         const group = mtCode.slice(0, 3)          // broad language number, e.g. "006"
         const kind = mtCode.slice(3)              // "000" head, "999" residual, else a mother tongue
@@ -256,14 +265,15 @@ for (const rows of indiaTables) {
 
         if (kind === '000') {
             const broadName = name.replace(/^\d+\s+/, '').trim() // "6 HINDI" -> "HINDI"
-            add(u, broadId(broadName, parseInt(group)), n)
+            add(u, broadId(broadName, parseInt(group)), n, nu)
             u.total += n // the broad languages partition the population
+            u.totalU += nu
             BROAD_BY_GROUP.set(group, broadName)
-            if (broadName === 'OTHERS') add(u, narrowId('Other(s)', 'OTHERS', mtCode), n)
+            if (broadName === 'OTHERS') add(u, narrowId('Other(s)', 'OTHERS', mtCode), n, nu)
         } else if (kind === '999') {
-            add(u, residualId(BROAD_BY_GROUP.get(group)), n)
+            add(u, residualId(BROAD_BY_GROUP.get(group)), n, nu)
         } else {
-            add(u, narrowId(name, BROAD_BY_GROUP.get(group), mtCode), n)
+            add(u, narrowId(name, BROAD_BY_GROUP.get(group), mtCode), n, nu)
         }
     }
 }
@@ -299,10 +309,19 @@ const pkShapes = new Set(
 // A row whose sub-division is its own district is the district total — that is how FATA
 // ("BAJAUR AGENCY") and Malakand report, so keying off a "DISTRICT" suffix missed them
 // and turned seven district aggregates into phantom sub-divisions.
-const pkRows = readObjects('data/pakistan.csv')
-    .filter(r => r.urban === 'TOTAL' && r.sex === 'ALL SEXES')
+const pkAll = readObjects('data/pakistan.csv').filter(r => r.sex === 'ALL SEXES')
+const pkRows = pkAll.filter(r => r.urban === 'TOTAL')
 const pkSubRows = pkRows.filter(r => r.subdivision !== r.district)
 const pkDistrictRows = pkRows.filter(r => r.subdivision === r.district)
+
+// The urban half of each figure lives in a parallel URBAN row; join it by (district,
+// subdivision, language) — a tehsil name alone repeats across districts, so keying without
+// the district lets one district's urban count land on another's total (>100% urban).
+// Rural is derived later as total - urban, as everywhere else.
+const pkKey = r => r.district + '|' + r.subdivision + '|' + r.language
+const pkUrbanOf = new Map()
+for (const r of pkAll)
+    if (r.urban === 'URBAN') pkUrbanOf.set(pkKey(r), parseInt(r.count) || 0)
 
 // The shapefile predates the 2017 census, which split new tehsils out (Lahore's Model
 // Town, Shalimar and Raiwind have no polygon). A tehsil with a polygon is drawn on its own;
@@ -346,11 +365,12 @@ for (const row of [...pkSubRows, ...pkDistrictRows]) {
         dtKey: coarse ? undefined : 'PK' + row.district,
     })
     const n = parseInt(row.count) || 0
-    if (row.language === 'TOTAL') { u.total = n; continue }
+    const nu = pkUrbanOf.get(pkKey(row)) || 0
+    if (row.language === 'TOTAL') { u.total = n; u.totalU = nu; continue }
     const m = PK_LANGS.get(row.language)
     if (!m) { console.warn(`  ! unmapped Pakistani language: ${row.language}`); continue }
-    add(u, broadId(m.broad_name), n)
-    add(u, foreignNarrowId(m.narrow_name, m.broad_name), n)
+    add(u, broadId(m.broad_name), n, nu)
+    add(u, foreignNarrowId(m.narrow_name, m.broad_name), n, nu)
 }
 
 // ---------------------------------------------------------------- Nepal
@@ -567,7 +587,7 @@ for (const [id, u] of Object.entries(units)) {
     if (near && geoIds.has(near)) {
         // a placed orphan: its own aside, attached to the one nearest drawn tehsil
         const okey = 'O:' + id
-        units[okey] = { country: u.country, aside: true, name: u.censusName, total: u.total, langs: u.langs }
+        units[okey] = { country: u.country, aside: true, name: u.censusName, total: u.total, langs: u.langs, totalU: u.totalU, langsU: u.langsU }
         ;(units[near].extras ??= []).push(okey)
         folded++; foldedPop += u.total
         delete units[id]
@@ -576,10 +596,12 @@ for (const [id, u] of Object.entries(units)) {
 
     const akey = 'A:' + u.dtKey
     const a = units[akey] ?? (units[akey] = {
-        country: u.country, aside: true, dtKey: u.dtKey, total: 0, langs: {},
+        country: u.country, aside: true, dtKey: u.dtKey, total: 0, langs: {}, totalU: 0, langsU: {},
     })
     for (const [lid, n] of Object.entries(u.langs)) a.langs[lid] = (a.langs[lid] || 0) + n
+    for (const [lid, n] of Object.entries(u.langsU)) a.langsU[lid] = (a.langsU[lid] || 0) + n
     a.total += u.total
+    a.totalU += u.totalU
     folded++
     foldedPop += u.total
     delete units[id] // subsumed by the aside; no longer a standalone orphan
@@ -654,11 +676,18 @@ if (unmappedFamilies.size)
 
 mkdirSync('dist', { recursive: true })
 
+// Urban counts (Lu) and urban total (tu) are shipped only where the census reports the
+// split — India and Pakistan. The client derives rural as total - urban, and treats a unit
+// with no tu (Nepal, Bangladesh) as having no urban/rural breakdown.
+const urban = u => (u.country === 'IN' || u.country === 'PK')
+const urbanL = u => (urban(u) && Object.keys(u.langsU).length ? u.langsU : undefined)
+
 const compact = {}
 for (const [id, u] of Object.entries(units)) {
     if (!geoIds.has(id) || u.aside) continue // no polygon, nothing to draw
     compact[id] = {
         n: u.name, d: u.district, s: u.state, c: u.country, t: u.total, L: u.langs,
+        tu: urban(u) ? u.totalU : undefined, Lu: urbanL(u),
         eb: +u.entropyBroad.toFixed(4), en: +u.entropyNarrow.toFixed(4),
         kb: u.nBroad, kn: u.nNarrow, o: +u.otherShare.toFixed(5),
         rb: u.rankBroad.slice(0, 8), rn: u.rankNarrow.slice(0, 8),
@@ -676,7 +705,8 @@ const asides = {}
 for (const [id, u] of Object.entries(units)) {
     if (!u.aside) continue
     asides[id] = {
-        t: u.total, L: u.langs, rb: u.rankBroad.slice(0, 5), rn: u.rankNarrow.slice(0, 5),
+        t: u.total, L: u.langs, tu: urban(u) ? u.totalU : undefined, Lu: urbanL(u),
+        rb: u.rankBroad.slice(0, 5), rn: u.rankNarrow.slice(0, 5),
         n: u.name, // present only for a placed orphan (its census name)
     }
 }
